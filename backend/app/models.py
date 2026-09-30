@@ -66,6 +66,17 @@ class Document(Base):
     verified_until = Column(DateTime, nullable=True)      # after this, shows "Needs review"
     last_reviewed_at = Column(DateTime, nullable=True)
     last_reviewed_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    # --- recycle bin / tags / personal workspace + publish workflow ---
+    deleted_at = Column(DateTime, nullable=True)          # soft delete: hidden everywhere, purged after 30 days
+    deleted_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    tags = Column(Text, default="")                       # comma separated
+    workspace = Column(String, default="company")         # company | personal | pending
+    submit_department = Column(String, nullable=True)     # what the author asked for when submitting
+    submit_visibility = Column(String, nullable=True)
+    submit_note = Column(Text, nullable=True)
+    review_note = Column(Text, nullable=True)             # approver's note (approve / reject / changes)
+    submitted_at = Column(DateTime, nullable=True)
+    content_changed_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=now)
 
     org = relationship("Organization", back_populates="documents")
@@ -96,6 +107,7 @@ class Fact(Base):
     status = Column(String, default="active")  # active | superseded | conflicting
     created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, default=now)
+    superseded_at = Column(DateTime, nullable=True)       # when it stopped being true
 
 
 class Conflict(Base):
@@ -111,6 +123,7 @@ class Conflict(Base):
     proposed_keep_id = Column(Integer, ForeignKey("facts.id"), nullable=True)
     proposed_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     proposed_note = Column(Text, nullable=True)
+    resolved_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=now)
 
 
@@ -150,6 +163,12 @@ class QARecord(Base):
     corrected_answer = Column(Text, nullable=True)
     review_note = Column(Text, nullable=True)
     reviewed_at = Column(DateTime, nullable=True)
+    # escalation of a flagged answer + "source changed, please re-review"
+    flagged_at = Column(DateTime, nullable=True)
+    esc_level = Column(Integer, default=0)
+    esc_due = Column(DateTime, nullable=True)
+    needs_rereview = Column(Boolean, default=False)
+    rereview_reason = Column(Text, nullable=True)
     created_at = Column(DateTime, default=now)
 
 
@@ -226,4 +245,177 @@ class FolderItem(Base):
     folder_id = Column(Integer, ForeignKey("folders.id"), nullable=False)
     document_id = Column(Integer, ForeignKey("documents.id"), nullable=False)
     added_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=now)
+
+
+class DocumentGrant(Base):
+    """Temporary access to ONE document (from an access request or a just-in-time link)."""
+    __tablename__ = "document_grants"
+    id = Column(Integer, primary_key=True)
+    org_id = Column(Integer, ForeignKey("organizations.id"), nullable=False)
+    document_id = Column(Integer, ForeignKey("documents.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    granted_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    source = Column(String, default="request")            # request | direct | jit
+    expires_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=now)
+
+
+class DocAccessRequest(Base):
+    __tablename__ = "doc_access_requests"
+    id = Column(Integer, primary_key=True)
+    org_id = Column(Integer, ForeignKey("organizations.id"), nullable=False)
+    document_id = Column(Integer, ForeignKey("documents.id"), nullable=False)
+    requester_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    reason = Column(Text, default="")
+    days = Column(Integer, default=1)                     # 1 | 7 | 30
+    status = Column(String, default="pending")            # pending | approved | denied
+    decided_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    decided_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=now)
+
+
+class JitToken(Base):
+    """Short-lived, one-time access link for a sensitive document."""
+    __tablename__ = "jit_tokens"
+    id = Column(Integer, primary_key=True)
+    org_id = Column(Integer, ForeignKey("organizations.id"), nullable=False)
+    document_id = Column(Integer, ForeignKey("documents.id"), nullable=False)
+    token = Column(String, nullable=False, unique=True)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    used_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    used_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=now)
+
+
+class DualControl(Base):
+    """Critical actions (reclassifying a Restricted document, permanent access) need a
+    second person - the requester can never approve their own request."""
+    __tablename__ = "dual_control"
+    id = Column(Integer, primary_key=True)
+    org_id = Column(Integer, ForeignKey("organizations.id"), nullable=False)
+    document_id = Column(Integer, ForeignKey("documents.id"), nullable=False)
+    action = Column(String, nullable=False)               # classify | permanent_access
+    payload = Column(Text, default="{}")                  # JSON
+    requested_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    decided_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    status = Column(String, default="pending")            # pending | approved | rejected
+    note = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=now)
+    decided_at = Column(DateTime, nullable=True)
+
+
+class Favorite(Base):
+    __tablename__ = "favorites"
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    document_id = Column(Integer, ForeignKey("documents.id"), nullable=False)
+    created_at = Column(DateTime, default=now)
+
+
+class DocComment(Base):
+    __tablename__ = "doc_comments"
+    id = Column(Integer, primary_key=True)
+    org_id = Column(Integer, ForeignKey("organizations.id"), nullable=False)
+    document_id = Column(Integer, ForeignKey("documents.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    text = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=now)
+
+
+class DocView(Base):
+    """Who opened a Confidential / Restricted document, and when."""
+    __tablename__ = "doc_views"
+    id = Column(Integer, primary_key=True)
+    org_id = Column(Integer, ForeignKey("organizations.id"), nullable=False)
+    document_id = Column(Integer, ForeignKey("documents.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, default=now)
+
+
+class Note(Base):
+    """Private notes / checklists in My Workspace. Never visible to anyone else."""
+    __tablename__ = "notes"
+    id = Column(Integer, primary_key=True)
+    org_id = Column(Integer, ForeignKey("organizations.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    kind = Column(String, default="note")                 # note | checklist
+    title = Column(String, nullable=False)
+    body = Column(Text, default="")                       # note text, or JSON [{"t":..,"done":bool}]
+    updated_at = Column(DateTime, default=now)
+    created_at = Column(DateTime, default=now)
+
+
+# ------------------------------------------------------------ insights pack ---
+
+class DocReviewRequest(Base):
+    """'This document needs a review' - goes to the owner, who reviews or assigns someone;
+    escalates up the reporting line if nobody acts."""
+    __tablename__ = "doc_review_requests"
+    id = Column(Integer, primary_key=True)
+    org_id = Column(Integer, ForeignKey("organizations.id"), nullable=False)
+    document_id = Column(Integer, ForeignKey("documents.id"), nullable=False)
+    requested_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    note = Column(Text, default="")
+    status = Column(String, default="open")               # open | assigned | done
+    assignee_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    assigned_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    holder_id = Column(Integer, ForeignKey("users.id"), nullable=True)   # who has to act right now
+    esc_level = Column(Integer, default=0)
+    esc_due = Column(DateTime, nullable=True)
+    completed_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=now)
+
+
+class FactDocLink(Base):
+    """Which documents a fact comes from ('source') or is mentioned in ('mention')."""
+    __tablename__ = "fact_doc_links"
+    id = Column(Integer, primary_key=True)
+    org_id = Column(Integer, ForeignKey("organizations.id"), nullable=False)
+    fact_id = Column(Integer, ForeignKey("facts.id"), nullable=False)
+    document_id = Column(Integer, ForeignKey("documents.id"), nullable=False)
+    kind = Column(String, default="source")
+
+
+class UsageEvent(Base):
+    """One 'I used this' click, tied to a specific answer (and the facts behind it)."""
+    __tablename__ = "usage_events"
+    id = Column(Integer, primary_key=True)
+    org_id = Column(Integer, ForeignKey("organizations.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    qa_id = Column(Integer, nullable=True)
+    document_id = Column(Integer, nullable=True)
+    fact_ids = Column(Text, default="[]")
+    note = Column(Text, default="")
+    created_at = Column(DateTime, default=now)
+
+
+class QuestionLog(Base):
+    __tablename__ = "question_log"
+    id = Column(Integer, primary_key=True)
+    org_id = Column(Integer, ForeignKey("organizations.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    department = Column(String, default="General")
+    question = Column(Text, nullable=False)
+    qa_id = Column(Integer, nullable=True)
+    answered = Column(Boolean, default=False)
+    matched_verified = Column(Boolean, default=False)
+    confidence = Column(String, nullable=True)
+    created_at = Column(DateTime, default=now)
+
+
+class GapRoute(Base):
+    """A repeated unanswered question that was sent to a department manager."""
+    __tablename__ = "gap_routes"
+    id = Column(Integer, primary_key=True)
+    org_id = Column(Integer, ForeignKey("organizations.id"), nullable=False)
+    department = Column(String, nullable=False)
+    question = Column(Text, nullable=False)
+    count_at_route = Column(Integer, default=0)
+    routed_to = Column(Integer, ForeignKey("users.id"), nullable=True)
+    task_id = Column(Integer, ForeignKey("tasks.id"), nullable=True)
+    answered_at = Column(DateTime, nullable=True)
+    answered_qa_id = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=now)

@@ -166,6 +166,16 @@ def user_can_see_document(user: models.User, doc: models.Document, db: Session =
     department gate and the visibility-tier gate."""
     if doc.org_id != user.org_id:
         return False
+    if getattr(doc, "deleted_at", None) is not None:      # recycle bin: gone for everybody
+        return False
+    if (getattr(doc, "workspace", None) or "company") != "company":
+        return doc.uploaded_by == user.id                  # personal / pending: author only
+    if db is not None:                                     # temporary per-document grant / JIT link
+        hit = db.query(models.DocumentGrant).filter(
+            models.DocumentGrant.document_id == doc.id, models.DocumentGrant.user_id == user.id,
+            models.DocumentGrant.expires_at > datetime.datetime.utcnow()).first()
+        if hit:
+            return True
     if doc.visibility == "restricted":
         allowed = {int(x) for x in (doc.allowed_user_ids or "").split(",") if x.strip().isdigit()}
         return user.id in allowed or user.role == "owner"
@@ -178,9 +188,10 @@ def user_can_see_document(user: models.User, doc: models.Document, db: Session =
     return False
 
 
-def authorized_chunks(db: Session, user: models.User):
+def authorized_chunks(db: Session, user: models.User, include_personal: bool = False):
     docs = db.query(models.Document).filter(models.Document.org_id == user.org_id).all()
-    visible = {d.id: d for d in docs if user_can_see_document(user, d, db)}
+    visible = {d.id: d for d in docs if user_can_see_document(user, d, db)
+               and (include_personal or (d.workspace or "company") == "company")}
     if not visible:
         return [], {}
     chunks = db.query(models.Chunk).filter(models.Chunk.document_id.in_(visible.keys())).all()
@@ -267,7 +278,8 @@ def search_grouped(db: Session, user: models.User, query: str, context: str = ""
                    document_id: Optional[int] = None, max_docs: int = 5):
     """Returns {"answer": {...}|None, "documents": [...], "passages": [...]} - all from
     documents this user is allowed to open."""
-    chunks, docs = authorized_chunks(db, user)
+    # a private workspace document is only ever searched when the author asks about it directly
+    chunks, docs = authorized_chunks(db, user, include_personal=document_id is not None)
     if document_id is not None:
         chunks = [c for c in chunks if c.document_id == document_id]
     if not chunks:
@@ -355,6 +367,22 @@ def _dice(a, b):
     return 2 * len(a & b) / (len(a) + len(b)) if a and b else 0.0
 
 
+def _cites_private_doc(db: Session, rec) -> bool:
+    """A verified answer must never leak a personal-workspace document to other people."""
+    import json
+    try:
+        for src in json.loads(rec.sources or "[]"):
+            did = src.get("document_id")
+            if did is None:
+                continue
+            d = db.query(models.Document).get(did)
+            if d is not None and (d.workspace or "company") != "company":
+                return True
+    except Exception:
+        return False
+    return False
+
+
 def find_verified(db: Session, user: models.User, question: str, threshold: float = 0.45):
     """Human-verified answers (from the supervisor review loop) outrank raw search."""
     from sklearn.feature_extraction.text import TfidfVectorizer
@@ -363,7 +391,7 @@ def find_verified(db: Session, user: models.User, question: str, threshold: floa
         models.QARecord.org_id == user.org_id,
         models.QARecord.status.in_(["verified", "corrected"]),
     ).all()
-    rows = [r for r in rows if dept_ok(user, r.department)]
+    rows = [r for r in rows if dept_ok(user, r.department) and not _cites_private_doc(db, r)]
     if not rows:
         return None
     try:

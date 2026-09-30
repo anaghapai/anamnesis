@@ -1,0 +1,25 @@
+/* Insights pack (reuses the variables from style.css) */
+.why-review{margin:8px 0;padding:8px 12px;border-left:3px solid var(--warn);background:rgba(251,191,36,.07);border-radius:6px;font-size:13px}
+.why-review ul{margin:4px 0 0 18px;padding:0}
+.ia-chip{margin-top:6px;color:var(--cyan)}
+.ia-sev-high{outline:1px solid var(--danger)}
+.ia-panel{margin:8px 0 12px}
+.lkt{margin:10px 0;padding:10px 12px;border:1px dashed var(--border);border-radius:8px;font-size:13px;background:#0a0f20}
+.lkt.warn{border-color:var(--warn);color:var(--warn)}
+.lkt.access{border-color:var(--cyan)}
+.ia-hint-row{margin-top:8px}
+.ia-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:50}
+.ia-modal{width:min(560px,92vw);max-height:88vh;overflow:auto}
+.ia-modal textarea,.ia-modal select,.ia-modal input{font:inherit}
+.ia-row{display:flex;justify-content:space-between;gap:14px;padding:10px 0;border-top:1px solid var(--border)}
+.ia-row:first-of-type{border-top:0}
+.ia-actions{display:flex;gap:6px;align-items:flex-start;flex-wrap:wrap;justify-content:flex-end}
+.ia-reasons{margin:6px 0 0 18px;padding:0;color:var(--text-dim);font-size:13px}
+#view-review .card,#view-insights .card{margin-bottom:16px}
+.ia-impact{margin-top:10px}.ia-big{font-size:18px;font-weight:600;margin-bottom:6px}
+.ia-stats{display:flex;gap:10px;flex-wrap:wrap;margin:10px 0}
+.ia-stats div{background:#0a0f20;border:1px solid var(--border);border-radius:8px;padding:8px 14px;text-align:center}
+.ia-stats b{display:block;font-size:20px}.ia-stats span{font-size:11px;color:var(--text-dim)}
+.muted{color:var(--text-dim)}
+table.mini{width:100%;border-collapse:collapse;font-size:13px}
+table.mini td{padding:6px 8px;border-top:1px solid var(--border);vertical-align:top}

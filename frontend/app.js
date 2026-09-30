@@ -70,7 +70,7 @@ function showView(name) {
   ({ dashboard: loadDashboard, mywork: loadMyWork, ask: initAsk,
      documents: () => { loadDocuments(); loadAccessRequests(); },
      graph: loadGraph, conflicts: loadConflicts, reviews: loadReviews, people: loadPeople,
-     settings: loadSettings, audit: loadAudit, account: loadAccount }[name] || (() => {}))();
+     settings: loadSettings, audit: loadAudit, account: loadAccount, ...(window.FEATURE_VIEWS || {}) }[name] || (() => {}))();
 }
 
 async function boot(forcePw) {
@@ -87,6 +87,7 @@ async function boot(forcePw) {
   fillSelect($("doc-dept"), ["All", ...ME.departments]);
   refreshPills();
   if (forcePw || ME.must_change_password) showView("account"); else showView("dashboard");
+  if (window.afterBoot) window.afterBoot(forcePw || ME.must_change_password);
 }
 
 async function refreshPills() {
@@ -206,7 +207,7 @@ function answerHtml(m) {
       <button class="btn-ghost" onclick="usedFor(${m.qa_id})">📌 I used this for a task</button></div>
       <div class="auth-error" id="ask-msg-${m.qa_id}"></div>`;
   }
-  return h;
+  return window.decorateAnswer ? window.decorateAnswer(m, h) : h;
 }
 
 function selectDocTab(qaId, i) {
@@ -378,9 +379,9 @@ async function loadDocuments() {
   let docs = await api("/documents" + (ACTIVE_FOLDER !== null ? `?folder_id=${ACTIVE_FOLDER}` : ""));
   if (filter) docs = docs.filter(d => d.department === filter || d.department === "All");
   $("doc-list").innerHTML = docs.length ? docs.map(d => {
-    const review = d.needs_review
+    const review = window.reviewBadge ? window.reviewBadge(d) : (d.needs_review
       ? `<span class="badge badge-stale">⏳ Needs review</span>`
-      : `<span class="badge badge-ok">✅ Verified until ${new Date(d.verified_until).toLocaleDateString()}</span>`;
+      : `<span class="badge badge-ok">✅ Verified until ${new Date(d.verified_until).toLocaleDateString()}</span>`);
     return `<div class="doc-row"><div class="doc-row-top"><a class="doc-title doc-link" href="#" onclick="openDoc(${d.id});return false">${esc(d.title)}</a>
       <span><span class="badge badge-file">${esc(d.file_type)}</span>
       <span class="badge badge-dept">${esc(d.department)}</span>
@@ -395,6 +396,7 @@ async function loadDocuments() {
         ${ACTIVE_FOLDER !== null && (FOLDERS.find(f => f.id === ACTIVE_FOLDER) || {}).can_edit ? `<button class="btn-ghost" onclick="removeFromFolder(${ACTIVE_FOLDER},${d.id})">↩ Remove from folder</button>` : folderPicker(d.id)}
       </div><div class="doc-summary hidden" id="doc-summary-${d.id}"></div></div>`;
   }).join("") : `<div class='empty-note'>${ACTIVE_FOLDER !== null ? "This folder is empty (or holds documents you can't open). Use “Add to folder” on any document." : "No documents yet."}</div>`;
+  if (window.decorateDocs) await window.decorateDocs(docs);
 }
 
 async function verifyDoc(id) {
@@ -447,9 +449,9 @@ async function openDoc(id, hl) {
     const d = await api(`/documents/${id}`);
     CUR_DOC = d; CUR_HL = hl || null;
     if (!FOLDERS.length) { try { FOLDERS = await api("/folders"); } catch {} }
-    const review = d.needs_review
+    const review = window.reviewBadge ? window.reviewBadge(d) : (d.needs_review
       ? `<span class="badge badge-stale">⏳ Needs review</span>`
-      : `<span class="badge badge-ok">✅ Verified until ${new Date(d.verified_until).toLocaleDateString()}</span>`;
+      : `<span class="badge badge-ok">✅ Verified until ${new Date(d.verified_until).toLocaleDateString()}</span>`);
     $("doc-viewer").innerHTML = `
       <div class="view-header-row"><h2 style="margin:0">${esc(d.title)}</h2></div>
       <div style="margin:8px 0 12px"><span class="badge badge-file">${esc(d.file_type)}</span>
@@ -470,6 +472,7 @@ async function openDoc(id, hl) {
       ${hl ? `<div class="hl-note">Showing where the answer came from — highlighted below.</div>` : ""}
       <div class="doc-fulltext">${markedText(d.content, hl)}</div>`;
     showView("doc");
+    if (window.decorateViewer) window.decorateViewer(d);
     const mk = $("doc-hl"); if (mk) setTimeout(() => mk.scrollIntoView({ block: "center", behavior: "smooth" }), 80);
   } catch (err) { alert(err.message); }
 }
@@ -597,7 +600,7 @@ async function loadMyWork() {
   $("my-tasks").innerHTML = w.tasks.length ? w.tasks.map(t => row(t, true)).join("") : "<div class='empty-note'>Nothing to do. Add a to-do above.</div>";
   $("delegated-h").classList.toggle("hidden", !w.delegated.length);
   $("delegated-tasks").innerHTML = w.delegated.map(t => row(t, false)).join("");
-  const icon = { used_for: "📌", progress: "📈", review_request: "🚩", review_result: "🧑‍⚖️" };
+  const icon = { used_for: "📌", progress: "📈", review_request: "🚩", review_result: "🧑‍⚖️", review_asked: "🔍", review_assigned: "👤", review_done: "✅", review_escalated: "⏫", recall: "📣", rereview: "♻️", knowledge_gap: "🕳️", gap_closed: "💡", access_request: "🔑" };
   $("inbox").innerHTML = inbox.length ? inbox.map(u => `<div class="inbox-row ${u.read ? "" : "unread"}">
       <div class="inbox-meta">${icon[u.kind] || "•"} ${esc(u.from)} · ${fmt(u.created_at)}</div>${esc(u.text)}</div>`).join("")
     : "<div class='empty-note'>Inbox is empty.</div>";

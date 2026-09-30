@@ -51,8 +51,10 @@ intern = user("Priya", "priya", "intern@demo.org", "intern", "IT", itlead)
 hr = user("Kabir", "kabir", "hr@demo.org", "member", "HR", admin)
 
 
-def add_doc(title, content, visibility, by, dept="All", allowed=None, age_days=0):
-    doc = models.Document(org_id=org.id, uploaded_by=by.id, owner_id=by.id, title=title, content=content,
+def add_doc(title, content, visibility, by, dept="All", allowed=None, age_days=0, tags=""):
+    reviewed = age_days < 90          # recently created documents count as reviewed; the 120-day-old VPN doc does not
+    doc = models.Document(tags=tags, last_reviewed_at=datetime.datetime.utcnow() - datetime.timedelta(days=age_days) if reviewed else None,
+                          last_reviewed_by=by.id if reviewed else None, org_id=org.id, uploaded_by=by.id, owner_id=by.id, title=title, content=content,
                           visibility=visibility, department=dept, file_type="text",
                           allowed_user_ids=",".join(str(u) for u in (allowed or [])),
                           created_at=datetime.datetime.utcnow() - datetime.timedelta(days=age_days))
@@ -66,7 +68,7 @@ def add_doc(title, content, visibility, by, dept="All", allowed=None, age_days=0
 add_doc("Employee Handbook",
         "Cipher Labs operates a hybrid work policy: employees may work remotely up to three days per week. "
         "All expense reports must be submitted within 30 days. The engineering team follows a two-week "
-        "sprint cycle with retros every second Friday.", "public", admin)
+        "sprint cycle with retros every second Friday.", "public", admin, tags="policy,hr")
 m1 = add_doc("Sprint Planning Notes - Sept 10",
              "Rahul confirmed he will lead the Postgres migration for Project Alpha. The backend team agreed "
              "the migration deadline is September 25th. Ananya raised a concern about downtime during business hours.",
@@ -76,7 +78,7 @@ m2 = add_doc("Backend Sync - Sept 18",
              "a staging rehearsal. Rahul will still own the migration end to end.", "internal", manager)
 add_doc("VPN Access Policy (IT)",
         "The VPN password rotates every 90 days and must be reset through the helpdesk portal. "
-        "Contractors receive a separate VPN profile from the IT desk.", "internal", itlead, "IT", age_days=120)
+        "Contractors receive a separate VPN profile from the IT desk.", "internal", itlead, "IT", age_days=120, tags="vpn,security")
 add_doc("Laptop Setup Guide (IT)",
         "New laptops are imaged by the IT desk within two working days. Request a laptop through the "
         "helpdesk portal and include the employee's department.", "internal", itlead, "IT", age_days=10)
@@ -107,5 +109,16 @@ db.add(models.Task(org_id=org.id, title="Reset my VPN token", owner="Priya", ass
                    created_by=intern.id, is_personal=True, deadline="Fri"))
 db.add(models.Task(org_id=org.id, title="Inventory the IT storeroom laptops", owner="Priya",
                    assignee_id=intern.id, created_by=itlead.id, deadline="Oct 3"))
+# a private workspace document + note for the intern (only priya can ever see these)
+personal = models.Document(org_id=org.id, uploaded_by=intern.id, owner_id=intern.id, title="Priya - IT onboarding cheat sheet",
+                           content="Helpdesk portal handles laptop requests. Ask Meera before resetting anyone's VPN token. "
+                                   "Storeroom inventory happens on the first Friday of the month.",
+                           visibility="internal", department="IT", file_type="text", workspace="personal")
+db.add(personal)
+db.flush()
+for i, c in enumerate(retrieval.chunk_text(personal.content)):
+    db.add(models.Chunk(document_id=personal.id, org_id=org.id, text=c, order_index=i))
+db.add(models.Note(org_id=org.id, user_id=intern.id, kind="checklist", title="First-week checklist",
+                   body='[{"t":"Get laptop imaged","done":true},{"t":"VPN profile","done":false},{"t":"Meet Meera 1:1","done":false}]'))
 db.commit()
 print("Seeded 'Cipher Labs'. See the docstring at the top of seed.py for logins and the demo story.")

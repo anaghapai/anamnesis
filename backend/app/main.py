@@ -11,10 +11,12 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
-from . import models, schemas, auth, retrieval, graph, extract
+from . import models, schemas, auth, retrieval, graph, extract, features, insights
 from .db import engine, get_db, SessionLocal
 
 models.Base.metadata.create_all(bind=engine)
+features.ensure_schema(engine)      # adds any missing column to an older anamnesis.db automatically
+insights.ensure_schema(engine)
 
 CHUNK_VERSION = "3"
 
@@ -41,6 +43,21 @@ def reindex_if_needed():
 
 
 reindex_if_needed()
+
+
+def _startup_purge():
+    """Documents that sat in the recycle bin for more than 30 days are removed for good."""
+    db = SessionLocal()
+    try:
+        features.purge_expired(db)
+    except Exception as e:
+        print("recycle-bin purge skipped:", e)
+    finally:
+        db.close()
+
+
+_startup_purge()
+insights.run_all_escalations()      # move overdue flags / review requests up the reporting line
 
 app = FastAPI(title="Anamnesis API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True,
@@ -428,13 +445,20 @@ def update_employee(emp_id: int, req: schemas.EmployeeUpdate,
         if req.role not in ROLES or auth.ROLE_RANK[req.role] >= auth.rank(user):
             raise HTTPException(400, "Invalid role for you to assign")
         emp.role = req.role
+    cleanup_reason = None
     if req.department is not None:
+        if req.department != emp.department:
+            cleanup_reason = f"moved from {emp.department} to {req.department}"
         emp.department = req.department
     if req.supervisor_id is not None:
         _check_supervisor(db, user.org_id, req.supervisor_id)
         emp.supervisor_id = req.supervisor_id or None
     if req.active is not None and emp.id != user.id:
+        if emp.active and not req.active:
+            cleanup_reason = "deactivated"
         emp.active = req.active
+    if cleanup_reason:      # temporary grants / extra access never follow a person to a new role
+        features.revoke_extra_access(db, emp, actor_id=user.id, reason=cleanup_reason)
     db.commit()
     log(db, user.org_id, user.id, "employee_updated", f"{emp.name}: {req.model_dump(exclude_none=True)}")
     return {"ok": True}
@@ -525,16 +549,22 @@ def list_documents(folder_id: Optional[int] = None, user: models.User = Depends(
         in_folder = {i.document_id for i in db.query(models.FolderItem).filter_by(folder_id=folder_id)}
         docs = [d for d in docs if d.id in in_folder]
     out = []
+    rinfo = insights.review_info(db, user.org_id, [x for x in docs if (x.workspace or "company") == "company"])
     for d in docs:
         # If you can't open it, it isn't listed at all - no locked placeholder,
         # regardless of whether that's a department gate or a visibility-tier gate.
         if not retrieval.user_can_see_document(user, d, db):
             continue
-        needs_review = d.verified_until is None or d.verified_until < datetime.datetime.utcnow()
+        if (d.workspace or "company") != "company":      # private/pending work lives in My Workspace
+            continue
+        ri = rinfo.get(d.id, {})
+        needs_review = ri.get("needs_review", False)
         body = " ".join(l for l in d.content.split("\n") if l.strip())
         out.append({"id": d.id, "title": d.title, "visibility": d.visibility, "department": d.department,
                     "file_type": d.file_type, "filename": d.filename, "uploaded_by": d.uploaded_by,
                     "owner_id": d.owner_id, "needs_review": needs_review,
+                    "review_state": ri.get("review_state"), "review_reasons": ri.get("review_reasons", []),
+                    "review_severity": ri.get("review_severity"),
                     "verified_until": d.verified_until.isoformat() if d.verified_until else None,
                     "last_reviewed_at": d.last_reviewed_at.isoformat() if d.last_reviewed_at else None,
                     "created_at": d.created_at.isoformat(), "visible_to_you": True,
@@ -549,16 +579,19 @@ def get_document(doc_id: int, user: models.User = Depends(auth.get_current_user)
     if not d or d.org_id != user.org_id or not retrieval.user_can_see_document(user, d, db):
         raise HTTPException(404, "Document not found")
     if d.visibility in ("confidential", "restricted"):
+        features.record_view(db, user, d)
         log(db, user.org_id, user.id, "document_view", f"'{d.title}' ({d.visibility})")
         db.commit()
     names = {u.id: u.name for u in db.query(models.User).filter_by(org_id=user.org_id)}
-    needs_review = d.verified_until is None or d.verified_until < datetime.datetime.utcnow()
+    ri = insights.review_info(db, user.org_id, [d])[d.id]
+    needs_review = ri["needs_review"]
     mine = [f for f in db.query(models.Folder).filter_by(org_id=user.org_id) if _folder_visible(user, f)]
     member_of = {i.folder_id for i in db.query(models.FolderItem).filter_by(document_id=d.id)}
     return {"id": d.id, "title": d.title, "content": d.content, "visibility": d.visibility,
             "department": d.department, "file_type": d.file_type, "filename": d.filename,
             "owner": names.get(d.owner_id), "uploaded_by": names.get(d.uploaded_by),
             "last_reviewed_by": names.get(d.last_reviewed_by), "needs_review": needs_review,
+            "review_state": ri["review_state"], "review_reasons": ri["review_reasons"], "review_severity": ri["review_severity"],
             "verified_until": d.verified_until.isoformat() if d.verified_until else None,
             "last_reviewed_at": d.last_reviewed_at.isoformat() if d.last_reviewed_at else None,
             "created_at": d.created_at.isoformat(),
@@ -584,11 +617,13 @@ def verify_document(doc_id: int, req: schemas.VerifyDocument, user: models.User 
     d = db.query(models.Document).get(doc_id)
     if not d or d.org_id != user.org_id or not retrieval.user_can_see_document(user, d, db):
         raise HTTPException(404, "Document not found")
-    if user.id != d.owner_id and auth.rank(user) < auth.ROLE_RANK["manager"]:
-        raise HTTPException(403, "Only the document's owner or a manager can mark it reviewed")
+    if (user.id != d.owner_id and auth.rank(user) < auth.ROLE_RANK["manager"]
+            and not insights.is_assigned_reviewer(db, user, d)):
+        raise HTTPException(403, "Only the document's owner, a manager or the assigned reviewer can mark it reviewed")
     d.last_reviewed_at = datetime.datetime.utcnow()
     d.last_reviewed_by = user.id
     d.verified_until = datetime.datetime.utcnow() + datetime.timedelta(days=req.days)
+    insights.on_document_verified(db, d, user)
     db.commit()
     log(db, user.org_id, user.id, "document_verified", f"{d.title} for {req.days}d")
     return {"ok": True, "verified_until": d.verified_until.isoformat()}
@@ -620,7 +655,8 @@ def _verified_block(db, rec, sim=None):
             "similarity": round(sim, 2) if sim is not None else None,
             "reviewer": reviewer.name if reviewer else None,
             "reviewed_at": rec.reviewed_at.isoformat() if rec.reviewed_at else None,
-            "note": rec.review_note}
+            "note": rec.review_note, "needs_rereview": bool(rec.needs_rereview),
+            "rereview_reason": rec.rereview_reason}
 
 
 def _group_passages(passages):
@@ -683,9 +719,14 @@ def ask(req: schemas.AskRequest, user: models.User = Depends(auth.get_current_us
     db.refresh(qa)
     log(db, user.org_id, user.id, "query" if answer_text else "query_no_result", question)
     db.commit()
-    return {"qa_id": qa.id, "question": question, "status": qa.status, "created_at": qa.created_at.isoformat(),
+    conf = features.compute_confidence(db, answer, res["documents"], verified)
+    extras = insights.ask_extras(db, user, question, answer_text, verified, res) if not scoped else {}
+    if not scoped:
+        insights.log_question(db, user, qa, answer_text, verified is not None, conf)
+    return {**extras, "qa_id": qa.id, "question": question, "status": qa.status, "created_at": qa.created_at.isoformat(),
             "verified": verified, "answer": answer, "documents": res["documents"], "passages": res["passages"],
-            "multi_hop": hop, "answered": bool(answer_text), "thread_of": thread_of}
+            "multi_hop": hop, "answered": bool(answer_text), "thread_of": thread_of,
+            "confidence": conf}
 
 
 def _root_id(by_id, qa):
@@ -724,7 +765,9 @@ def _message_out(db, user, qa, doc_cache):
         if rec and rec.org_id == user.org_id:
             verified = _verified_block(db, rec)
     rev = db.query(models.User).get(qa.reviewer_id) if qa.reviewer_id else None
+    docs_grouped = _group_passages(passages)
     return {"qa_id": qa.id, "question": qa.question, "answer_plain": qa.answer_text, "answer": answer,
+            "confidence": features.compute_confidence(db, answer, docs_grouped, verified),
             "verified": verified, "documents": _group_passages(passages), "passages": passages,
             "multi_hop": hop, "answered": bool(qa.answer_text), "status": qa.status,
             "corrected_answer": qa.corrected_answer, "review_note": qa.review_note,
@@ -787,6 +830,7 @@ def flag_answer(qa_id: int, req: schemas.FlagRequest, user: models.User = Depend
     if qa.status not in ("unreviewed", "rejected"):
         raise HTTPException(400, f"Already {qa.status}")
     qa.status, qa.flag_note = "flagged", req.note
+    insights.on_flag(db, qa)
     sup = supervisor_for(db, user)
     if sup:
         notify(db, user.org_id, user.id, sup.id, "review_request",
@@ -842,6 +886,7 @@ def resolve_review(qa_id: int, req: schemas.ReviewRequest,
         fact_msg = " A corrected fact was added to the graph" + (" and a conflict was flagged." if conflict else ".")
 
     label = {"approve": "verified", "correct": "corrected", "reject": "marked wrong"}[req.verdict]
+    insights.on_review_resolved(db, user, qa, req.verdict)
     notify(db, user.org_id, user.id, qa.user_id, "review_result",
            f"{user.name} {label} your question \"{qa.question}\"."
            + (f" Correct answer: {qa.corrected_answer}" if qa.corrected_answer else "") + fact_msg, qa_id=qa.id)
@@ -876,6 +921,8 @@ def send_update(req: schemas.UpdateCreate, user: models.User = Depends(auth.get_
             recipients.add(doc.uploaded_by)
             title = f" (source: {doc.title})"
     recipients.discard(user.id)
+    if req.kind == "used_for":
+        insights.record_usage(db, user, req.qa_id, req.document_id, req.text)
     for rid in recipients:
         notify(db, user.org_id, user.id, rid, req.kind, req.text.strip() + title,
                document_id=req.document_id, qa_id=req.qa_id)
@@ -973,6 +1020,8 @@ def resolve_conflict(conflict_id: int, req: schemas.ConflictResolve,
     old, new = db.query(models.Fact).get(c.old_fact_id), db.query(models.Fact).get(c.new_fact_id)
     keep, drop = (old, new) if req.keep_fact_id == old.id else (new, old)
     keep.status, drop.status, c.resolved, c.resolution_note = "active", "superseded", True, req.note
+    c.resolved_at = datetime.datetime.utcnow()
+    insights.on_conflict_resolved(db, user, keep, drop)
     db.commit()
     log(db, user.org_id, user.id, "conflict_resolved", f"kept '{keep.subject} {keep.relation} {keep.object}' (fact #{keep.id})")
     return {"resolved": True, "kept_fact_id": keep.id}
@@ -1188,7 +1237,7 @@ def dashboard(user: models.User = Depends(auth.get_current_user), db: Session = 
     o = user.org_id
     q = db.query(models.QARecord).filter_by(org_id=o)
     visible_docs = sum(1 for d in db.query(models.Document).filter_by(org_id=o)
-                       if retrieval.user_can_see_document(user, d, db))
+                       if (d.workspace or "company") == "company" and retrieval.user_can_see_document(user, d, db))
     return {
         "documents": visible_docs,
         "open_conflicts": db.query(models.Conflict).filter_by(org_id=o, resolved=False).count(),
@@ -1199,6 +1248,12 @@ def dashboard(user: models.User = Depends(auth.get_current_user), db: Session = 
         "pending_reviews": q.filter_by(status="flagged").count(),
         "people": db.query(models.User).filter_by(org_id=o, active=True).count(),
     }
+
+
+# ------------------------------------------------- feature pack 2 routes -----
+
+app.include_router(features.router)
+app.include_router(insights.router)
 
 
 # ------------------------------------------------------- static files -----

@@ -5,7 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Anamnesis — Organizational Brain</title>
 <link rel="stylesheet" href="/static/style.css">
-<script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
+<link rel="stylesheet" href="/static/features.css">
+<link rel="stylesheet" href="/static/insights.css">
+<script src="/static/vendor/vis-network.min.js"></script>
 </head>
 <body>
 
@@ -61,6 +63,10 @@
       <button class="nav-item" data-view="mywork">🗂️ My Work <span class="pill hidden" id="pill-work"></span></button>
       <button class="nav-item" data-view="ask">💬 Ask</button>
       <button class="nav-item" data-view="documents">📄 Documents</button>
+      <button class="nav-item" data-view="workspace">🔒 My Workspace</button>
+      <button class="nav-item" data-view="approvals" data-min="manager">✅ Approvals <span class="pill hidden" id="pill-approvals"></span></button>
+      <button class="nav-item" data-view="health">💚 Knowledge Health</button>
+      <button class="nav-item" data-view="recycle">🗑️ Recycle Bin</button>
       <button class="nav-item" data-view="graph">🕸️ Knowledge Graph</button>
       <button class="nav-item" data-view="conflicts">⚠️ Conflicts</button>
       <button class="nav-item" data-view="reviews" data-min="manager">🧑‍⚖️ Reviews <span class="pill hidden" id="pill-reviews"></span></button>
@@ -201,6 +207,58 @@
         <h3>Requests waiting on you</h3>
         <div id="acc-review"></div>
       </div>
+
+      <div class="view-header-row" style="margin-top:22px"><h3 style="margin:0">Request access to one document</h3></div>
+      <p class="view-sub">Got a link or document number you can't open? Ask for time-limited access (1, 7 or 30 days). The owner or manager decides, and access expires by itself.</p>
+      <div class="card">
+        <div class="row-gap">
+          <input type="number" id="dacc-id" placeholder="Document #" min="1" style="max-width:130px">
+          <input type="text" id="dacc-reason" placeholder="Reason">
+          <select id="dacc-days" style="max-width:110px"><option value="1">1 day</option><option value="7">7 days</option><option value="30">30 days</option></select>
+          <button class="btn-primary" id="dacc-btn">Request</button>
+        </div>
+        <div class="auth-error" id="dacc-msg"></div>
+      </div>
+      <div id="dacc-mine"></div>
+      <div id="dacc-review-wrap" class="hidden"><h3>Document requests waiting on you</h3><div id="dacc-review"></div></div>
+    </section>
+
+
+    <section id="view-workspace" class="view">
+      <h2>My Workspace <span class="badge badge-restricted">🔒 private</span></h2>
+      <p class="view-sub">Only you can see anything on this page. Nothing here is searched by Ask or shown to anyone until you press <b>Submit for approval</b>.
+        Personal folders for company documents live under <a href="#" onclick="showView('documents');return false">Documents</a>.</p>
+      <div class="card">
+        <div class="auth-tabs"><button class="auth-tab active" data-wstab="file">Upload file</button><button class="auth-tab" data-wstab="text">Paste text</button></div>
+        <div id="ws-file-wrap"><input type="file" id="ws-file" accept=".pdf,.docx,.pptx,.txt,.md,.csv,.tsv,.json,.log"></div>
+        <div id="ws-text-wrap" class="hidden"><textarea id="ws-content" rows="5" placeholder="Paste text..."></textarea></div>
+        <input type="text" id="ws-title" placeholder="Title (optional for files)">
+        <div class="row-gap"><button class="btn-primary" id="ws-add-btn">Add to my workspace</button></div>
+        <div class="auth-error" id="ws-msg"></div>
+      </div>
+      <h3>My documents</h3><div id="ws-docs"></div>
+      <div class="view-header-row"><h3>Notes &amp; checklists</h3>
+        <span><button class="btn-secondary" onclick="newNote('note')">+ Note</button> <button class="btn-secondary" onclick="newNote('checklist')">+ Checklist</button></span></div>
+      <div id="ws-notes" class="note-grid"></div>
+    </section>
+
+    <section id="view-approvals" class="view">
+      <h2>Approvals</h2>
+      <p class="view-sub">Documents people submitted for your department, plus critical changes that need a second person. You can't approve your own request.</p>
+      <h3>Submitted documents</h3><div id="appr-docs"></div>
+      <h3>Dual control</h3><div id="appr-dual"></div>
+    </section>
+
+    <section id="view-health" class="view">
+      <h2>Knowledge Health</h2>
+      <p class="view-sub">A 0-100 score from plain arithmetic - no AI. Every point below is explained.</p>
+      <div id="health-box"></div>
+    </section>
+
+    <section id="view-recycle" class="view">
+      <h2>Recycle Bin</h2>
+      <p class="view-sub">Deleted documents stay here for 30 days and can be restored. After that they are removed permanently.</p>
+      <div id="recycle-list"></div>
     </section>
 
     <section id="view-graph" class="view">
@@ -293,6 +351,16 @@
   </main>
 </div>
 
+
+<button id="help-fab" title="Help &amp; navigation">❓</button>
+<div id="help-panel" class="hidden">
+  <div class="help-head"><b>Help &amp; Navigation</b><a href="#" id="help-close">✕</a></div>
+  <div class="help-note">I only explain how to use Anamnesis. I can't see any company documents.</div>
+  <div id="help-log"></div>
+  <form id="help-form"><input type="text" id="help-input" placeholder="e.g. How do I request access?" autocomplete="off"><button class="btn-primary" style="margin:0">Ask</button></form>
+</div>
 <script src="/static/app.js"></script>
+<script src="/static/features.js"></script>
+<script src="/static/insights.js"></script>
 </body>
 </html>
