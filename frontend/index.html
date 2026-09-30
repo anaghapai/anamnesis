@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Anamnesis — Organizational Brain</title>
+<link rel="stylesheet" href="/static/style.css">
+<script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
+</head>
+<body>
+
+<div id="auth-screen" class="auth-screen">
+  <div class="auth-card">
+    <div class="brand"><span class="brand-dot"></span><h1>Anamnesis</h1></div>
+    <p class="tagline">A private organizational brain with memory, permission &amp; provenance.</p>
+    <div class="auth-tabs">
+      <button class="auth-tab active" data-tab="login">Log in</button>
+      <button class="auth-tab" data-tab="signup">Create organization</button>
+    </div>
+
+    <form id="login-form" class="auth-form">
+      <label>Username or email</label>
+      <input type="text" id="login-id" required placeholder="e.g. priya  or  you@gmail.com" autocomplete="username">
+      <label>Password</label>
+      <input type="password" id="login-password" required placeholder="••••••••" autocomplete="current-password">
+      <button type="submit" class="btn-primary">Log in</button>
+      <div class="auth-error" id="login-error"></div>
+      <div class="demo-hint">
+        Employees: your admin gives you a username and password — there is no self-signup.<br><br>
+        Demo (password <code>demo1234</code>): <code>asha</code> owner · <code>rahul</code> Eng manager ·
+        <code>meera</code> IT manager · <code>priya</code> IT intern · <code>kabir</code> HR
+      </div>
+    </form>
+
+    <form id="signup-form" class="auth-form hidden">
+      <div class="demo-hint" style="margin-top:0">Only pre-approved Google/Gmail addresses can create an organization.</div>
+      <label>Your name</label>
+      <input type="text" id="signup-name" required placeholder="Full name">
+      <label>Google email</label>
+      <input type="email" id="signup-email" required placeholder="you@gmail.com">
+      <label>Organization name</label>
+      <input type="text" id="signup-orgname" required placeholder="Organization name">
+      <label>Password</label>
+      <input type="password" id="signup-password" required minlength="6" placeholder="At least 6 characters">
+      <button type="submit" class="btn-primary">Create organization</button>
+      <div class="auth-error" id="signup-error"></div>
+    </form>
+  </div>
+</div>
+
+<div id="app" class="app hidden">
+  <aside class="sidebar">
+    <div class="brand"><span class="brand-dot"></span><h1>Anamnesis</h1></div>
+    <div class="me-box">
+      <div class="me-name" id="me-name">—</div>
+      <div class="me-role" id="me-role">—</div>
+      <div class="me-org" id="me-org">—</div>
+    </div>
+    <nav>
+      <button class="nav-item active" data-view="dashboard">📊 Dashboard</button>
+      <button class="nav-item" data-view="mywork">🗂️ My Work <span class="pill hidden" id="pill-work"></span></button>
+      <button class="nav-item" data-view="ask">💬 Ask</button>
+      <button class="nav-item" data-view="documents">📄 Documents</button>
+      <button class="nav-item" data-view="graph">🕸️ Knowledge Graph</button>
+      <button class="nav-item" data-view="conflicts">⚠️ Conflicts</button>
+      <button class="nav-item" data-view="reviews" data-min="manager">🧑‍⚖️ Reviews <span class="pill hidden" id="pill-reviews"></span></button>
+      <button class="nav-item" data-view="people">👥 People</button>
+      <button class="nav-item" data-view="settings" data-min="admin">⚙️ Org Settings</button>
+      <button class="nav-item" data-view="audit" data-min="manager">🧾 Audit Log</button>
+      <button class="nav-item" data-view="account">👤 My Account</button>
+    </nav>
+    <button class="btn-logout" id="logout-btn">Log out</button>
+  </aside>
+
+  <main class="content">
+
+    <section id="view-dashboard" class="view active">
+      <h2>Dashboard</h2>
+      <div class="stat-grid" id="stat-grid"></div>
+      <div class="hint-card">
+        <strong>Feedback-loop demo:</strong> log in as <code>priya</code> (IT intern) → Ask
+        <em>"how often does the vpn password rotate"</em> → the answer comes from a 120-day-old doc
+        (marked stale) → <strong>Flag as wrong</strong>. Log in as <code>meera</code> (IT manager) →
+        <strong>Reviews</strong> → write the correction. Log back in as <code>priya</code> and ask again:
+        the verified answer now comes first.
+      </div>
+    </section>
+
+    <section id="view-mywork" class="view">
+      <h2>My Work</h2>
+      <p class="view-sub">Your personal to-dos, tasks assigned to you, and updates from your team.</p>
+      <div class="card">
+        <div class="row-gap">
+          <input type="text" id="task-title" placeholder="New to-do…">
+          <input type="text" id="task-deadline" placeholder="Due (optional)" style="max-width:150px">
+        </div>
+        <div class="row-gap">
+          <select id="task-assignee"><option value="">Just me (private to-do)</option></select>
+          <button class="btn-primary" id="task-submit-btn">Add</button>
+        </div>
+        <div class="auth-error" id="task-error"></div>
+      </div>
+      <h3>To do</h3><div id="my-tasks"></div>
+      <h3 id="delegated-h" class="hidden">Tasks I assigned</h3><div id="delegated-tasks"></div>
+      <div class="view-header-row"><h3>Inbox</h3><button class="btn-ghost" id="mark-read-btn">Mark all read</button></div>
+      <div id="inbox"></div>
+    </section>
+
+    <section id="view-ask" class="view">
+      <div class="chat-layout">
+        <aside class="chat-side">
+          <button class="btn-primary" id="chat-new-btn" style="width:100%;margin:0 0 10px">+ New chat</button>
+          <div id="chat-list"></div>
+        </aside>
+        <div class="chat-main">
+          <div class="chat-head"><h2 style="margin:0">Ask Anamnesis</h2>
+            <p class="view-sub" style="margin:4px 0 0">Answers are extractive and cited — pulled from documents you're allowed to open, never generated.
+              Keep asking in the same chat and it remembers the topic.</p></div>
+          <div id="chat-thread" class="chat-thread"></div>
+          <div id="chat-scope" class="chat-scope hidden"></div>
+          <form id="ask-form" class="ask-form">
+            <input type="text" id="ask-input" placeholder="Ask anything, e.g. how many days off do I get?" required autocomplete="off">
+            <button type="submit" class="btn-primary">Ask</button>
+          </form>
+        </div>
+      </div>
+    </section>
+
+    <section id="view-doc" class="view">
+      <button class="btn-ghost" id="doc-back-btn">← Back</button>
+      <div id="doc-viewer"></div>
+    </section>
+
+    <section id="view-documents" class="view">
+      <div class="view-header-row">
+        <h2>Documents</h2>
+        <button class="btn-secondary" id="new-doc-btn" data-min="manager">+ Add document</button>
+      </div>
+      <div class="folder-bar" id="folder-bar"></div>
+      <div id="folder-form" class="card hidden">
+        <div class="row-gap">
+          <input type="text" id="folder-name" placeholder="Folder name" maxlength="80">
+          <select id="folder-scope"></select>
+          <button class="btn-primary" id="folder-create-btn">Create</button>
+          <button class="btn-ghost" id="folder-cancel-btn" type="button">Cancel</button>
+        </div>
+        <div class="auth-error" id="folder-error"></div>
+      </div>
+      <div id="folder-head"></div>
+      <div class="filter-row"><label>Department</label><select id="doc-filter"><option value="">All departments</option></select></div>
+      <div id="doc-upload-form" class="card hidden">
+        <div class="auth-tabs">
+          <button class="auth-tab active" data-doctab="file">Upload file</button>
+          <button class="auth-tab" data-doctab="text">Paste text</button>
+        </div>
+        <div id="doc-file-wrap">
+          <label>File (PDF, Word, PowerPoint, TXT, MD, CSV — max 10 MB)</label>
+          <input type="file" id="doc-file" accept=".pdf,.docx,.pptx,.txt,.md,.csv,.tsv,.json,.log">
+        </div>
+        <div id="doc-text-wrap" class="hidden">
+          <label>Content</label>
+          <textarea id="doc-content" rows="6" placeholder="Paste the document text..."></textarea>
+        </div>
+        <label>Title (optional for files)</label>
+        <input type="text" id="doc-title" placeholder="e.g. Sprint Planning Notes">
+        <div class="row-gap">
+          <div style="flex:1"><label>Department</label><select id="doc-dept"></select></div>
+          <div style="flex:1"><label>Visibility</label>
+            <select id="doc-visibility">
+              <option value="public">Public — anyone allowed by department</option>
+              <option value="internal" selected>Internal — any member</option>
+              <option value="confidential">Confidential — managers and above</option>
+              <option value="restricted">Restricted — only named people</option>
+            </select></div>
+        </div>
+        <div id="doc-allowed-wrap" class="hidden">
+          <label>Allowed people (hold Ctrl/Cmd to pick several)</label>
+          <select id="doc-allowed" multiple size="5"></select>
+        </div>
+        <div class="row-gap">
+          <button class="btn-primary" id="doc-submit-btn">Upload &amp; index</button>
+          <button class="btn-ghost" id="doc-cancel-btn" type="button">Cancel</button>
+        </div>
+        <div class="auth-error" id="doc-error"></div>
+      </div>
+      <div id="doc-list"></div>
+
+      <div class="view-header-row" style="margin-top:22px"><h3 style="margin:0">Cross-department access</h3></div>
+      <p class="view-sub">You only see your own department's documents by default. Ask the department's manager (or an admin/owner) for temporary access to another one.</p>
+      <div class="card">
+        <div class="row-gap">
+          <select id="acc-dept"></select>
+          <input type="text" id="acc-reason" placeholder="Reason (optional)">
+          <input type="number" id="acc-hours" value="24" min="1" max="720" style="max-width:90px" title="Hours">
+          <button class="btn-primary" id="acc-request-btn">Request access</button>
+        </div>
+        <div class="auth-error" id="acc-error"></div>
+      </div>
+      <div id="acc-mine"></div>
+      <div id="acc-review-wrap" class="hidden">
+        <h3>Requests waiting on you</h3>
+        <div id="acc-review"></div>
+      </div>
+    </section>
+
+    <section id="view-graph" class="view">
+      <div class="view-header-row"><h2>Knowledge Graph</h2><button class="btn-secondary" id="new-fact-btn">+ Add fact</button></div>
+      <p class="view-sub">The graph behind multi-hop reasoning. A fact that contradicts an existing one is flagged as a conflict instead of silently overwriting it.</p>
+      <div id="fact-form" class="card hidden">
+        <div class="row-gap">
+          <input type="text" id="fact-subject" placeholder="Subject (e.g. Rahul)">
+          <input type="text" id="fact-relation" placeholder="Relation (e.g. owns)">
+          <input type="text" id="fact-object" placeholder="Object (e.g. Postgres Migration)">
+        </div>
+        <div class="row-gap">
+          <button class="btn-primary" id="fact-submit-btn">Add fact</button>
+          <button class="btn-ghost" id="fact-cancel-btn" type="button">Cancel</button>
+        </div>
+        <div class="auth-error" id="fact-error"></div>
+      </div>
+      <div id="graph-canvas"></div>
+    </section>
+
+    <section id="view-conflicts" class="view">
+      <h2>Conflicts</h2>
+      <p class="view-sub">Pick which version to keep — the other is marked superseded, not deleted.</p>
+      <div id="conflict-list"></div>
+    </section>
+
+    <section id="view-reviews" class="view">
+      <h2>Answer Reviews</h2>
+      <p class="view-sub">Answers your team flagged as wrong or outdated. Approve, correct, or reject — approved and corrected
+        answers are served first the next time someone asks a similar question.</p>
+      <div id="review-list"></div>
+    </section>
+
+    <section id="view-people" class="view">
+      <div class="view-header-row"><h2>People</h2><button class="btn-secondary" id="new-emp-btn" data-min="manager">+ Add employee</button></div>
+      <div id="cred-box" class="card cred-box hidden"></div>
+      <div id="people-pending-wrap" class="hidden"><h3>Waiting on your approval</h3><div id="people-pending"></div></div>
+      <div id="emp-form" class="card hidden">
+        <div class="row-gap">
+          <input type="text" id="emp-name" placeholder="Full name">
+          <input type="email" id="emp-email" placeholder="Work email (optional)">
+        </div>
+        <div class="row-gap">
+          <select id="emp-role"></select>
+          <select id="emp-dept"></select>
+        </div>
+        <div class="row-gap">
+          <button class="btn-primary" id="emp-submit-btn">Create &amp; generate login</button>
+          <button class="btn-ghost" id="emp-cancel-btn" type="button">Cancel</button>
+        </div>
+        <div class="auth-error" id="emp-error"></div>
+      </div>
+      <div id="people-list"></div>
+    </section>
+
+    <section id="view-settings" class="view">
+      <h2>Organization Settings</h2>
+      <div class="card">
+        <label>Organization name</label><input type="text" id="set-name">
+        <label>Accent colour</label><input type="color" id="set-accent" value="#22d3ee">
+        <label>Departments (comma separated)</label><input type="text" id="set-depts">
+        <div class="row-gap"><button class="btn-primary" id="set-save-btn">Save settings</button></div>
+        <div class="auth-error" id="set-msg"></div>
+      </div>
+    </section>
+
+    <section id="view-audit" class="view">
+      <h2>Audit Log</h2>
+      <p class="view-sub">Every login, query, upload, review and change — visible to managers and above.</p>
+      <div id="audit-list"></div>
+    </section>
+
+    <section id="view-account" class="view">
+      <h2>My Account</h2>
+      <div id="force-pw" class="hint-card hidden">🔐 You're using a temporary password. Please set your own below before continuing.</div>
+      <div class="card" id="account-card"></div>
+      <div class="card">
+        <h3 style="margin-top:0">Display name</h3>
+        <div class="row-gap"><input type="text" id="acc-name"><button class="btn-secondary" id="acc-name-btn">Save</button></div>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">Change password</h3>
+        <label>Current password</label><input type="password" id="pw-old" autocomplete="new-password">
+        <label>New password</label><input type="password" id="pw-new" minlength="6" autocomplete="new-password">
+        <div class="row-gap"><button class="btn-primary" id="pw-btn">Update password</button></div>
+        <div class="auth-error" id="pw-msg"></div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

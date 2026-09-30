@@ -1,0 +1,5 @@
+# Founder allow-list: only these Google/Gmail addresses can create an organization.
+# One email per line, lowercase. Restart the server after editing.
+# >>> Replace these with your team's real Gmail addresses <<<
+founder1@gmail.com
+founder2@gmail.com
