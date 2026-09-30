@@ -169,6 +169,11 @@ class QARecord(Base):
     esc_due = Column(DateTime, nullable=True)
     needs_rereview = Column(Boolean, default=False)
     rereview_reason = Column(Text, nullable=True)
+    # knowledge impact: answer built on wording that later changed
+    impact_status = Column(String, nullable=True)         # needs_review | None
+    impact_reason = Column(Text, nullable=True)
+    impact_event_id = Column(Integer, nullable=True)
+    superseded_by = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=now)
 
 
@@ -418,4 +423,65 @@ class GapRoute(Base):
     task_id = Column(Integer, ForeignKey("tasks.id"), nullable=True)
     answered_at = Column(DateTime, nullable=True)
     answered_qa_id = Column(Integer, nullable=True)
+    created_at = Column(DateTime, default=now)
+
+
+# ------------------------------------------------------------- brain pack ---
+
+class DocumentVersion(Base):
+    """Every managed edit of a document keeps the full previous text (v1 = the original)."""
+    __tablename__ = "document_versions"
+    id = Column(Integer, primary_key=True)
+    org_id = Column(Integer, ForeignKey("organizations.id"), nullable=False)
+    document_id = Column(Integer, ForeignKey("documents.id"), nullable=False)
+    version = Column(Integer, nullable=False)
+    title = Column(String, nullable=True)
+    content = Column(Text, nullable=False)
+    changed_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    note = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=now)
+
+
+class ImpactEvent(Base):
+    """One change (document edit or superseded fact) and the JSON analysis of what it touched."""
+    __tablename__ = "impact_events"
+    id = Column(Integer, primary_key=True)
+    org_id = Column(Integer, ForeignKey("organizations.id"), nullable=False)
+    kind = Column(String, default="document")             # document | fact
+    document_id = Column(Integer, nullable=True)
+    fact_id = Column(Integer, nullable=True)
+    version = Column(Integer, nullable=True)
+    title = Column(String, nullable=True)
+    note = Column(Text, nullable=True)
+    analysis = Column(Text, default="{}")
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=now)
+
+
+class KnowledgeRequest(Base):
+    """'Ask the organization': a question nobody's documents answer, routed to a person who is
+    authorized for that knowledge area. Answers become organizational knowledge only once verified."""
+    __tablename__ = "knowledge_requests"
+    id = Column(Integer, primary_key=True)
+    org_id = Column(Integer, ForeignKey("organizations.id"), nullable=False)
+    requester_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    qa_id = Column(Integer, nullable=True)
+    question = Column(Text, nullable=False)
+    department = Column(String, nullable=True)
+    scope = Column(Text, default="")                      # comma separated departments the topic touches
+    assignee_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    route = Column(String, default="supervisor")          # expert | supervisor
+    reason = Column(Text, nullable=True)
+    # assigned | answered | verification_pending | verified | declined
+    status = Column(String, default="assigned")
+    answer = Column(Text, nullable=True)
+    answered_by = Column(Integer, nullable=True)
+    answered_at = Column(DateTime, nullable=True)
+    verified_by = Column(Integer, nullable=True)
+    verified_at = Column(DateTime, nullable=True)
+    verify_note = Column(Text, nullable=True)
+    reviewer_id = Column(Integer, nullable=True)
+    result_qa_id = Column(Integer, nullable=True)
+    share_with = Column(String, nullable=True)            # department | company
+    forwards = Column(Text, default="[]")
     created_at = Column(DateTime, default=now)

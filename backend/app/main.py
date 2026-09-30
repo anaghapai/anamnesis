@@ -11,12 +11,13 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
-from . import models, schemas, auth, retrieval, graph, extract, features, insights
+from . import models, schemas, auth, retrieval, graph, extract, features, insights, impact, knowledge, llm
 from .db import engine, get_db, SessionLocal
 
 models.Base.metadata.create_all(bind=engine)
 features.ensure_schema(engine)      # adds any missing column to an older anamnesis.db automatically
 insights.ensure_schema(engine)
+impact.ensure_schema(engine)        # knowledge-impact columns on qa_records
 
 CHUNK_VERSION = "3"
 
@@ -723,10 +724,12 @@ def ask(req: schemas.AskRequest, user: models.User = Depends(auth.get_current_us
     extras = insights.ask_extras(db, user, question, answer_text, verified, res) if not scoped else {}
     if not scoped:
         insights.log_question(db, user, qa, answer_text, verified is not None, conf)
+    flag = impact.flag_for(db, qa)
     return {**extras, "qa_id": qa.id, "question": question, "status": qa.status, "created_at": qa.created_at.isoformat(),
             "verified": verified, "answer": answer, "documents": res["documents"], "passages": res["passages"],
             "multi_hop": hop, "answered": bool(answer_text), "thread_of": thread_of,
-            "confidence": conf}
+            "confidence": conf, "impact": flag,
+            "state": impact.answer_state(db, bool(answer_text), verified, flag, res["documents"], hop, conf)}
 
 
 def _root_id(by_id, qa):
@@ -766,8 +769,11 @@ def _message_out(db, user, qa, doc_cache):
             verified = _verified_block(db, rec)
     rev = db.query(models.User).get(qa.reviewer_id) if qa.reviewer_id else None
     docs_grouped = _group_passages(passages)
+    conf = features.compute_confidence(db, answer, docs_grouped, verified)
+    flag = impact.flag_for(db, qa)
     return {"qa_id": qa.id, "question": qa.question, "answer_plain": qa.answer_text, "answer": answer,
-            "confidence": features.compute_confidence(db, answer, docs_grouped, verified),
+            "impact": flag, "state": impact.answer_state(db, bool(qa.answer_text), verified, flag, docs_grouped, hop, conf),
+            "confidence": conf,
             "verified": verified, "documents": _group_passages(passages), "passages": passages,
             "multi_hop": hop, "answered": bool(qa.answer_text), "status": qa.status,
             "corrected_answer": qa.corrected_answer, "review_note": qa.review_note,
@@ -1024,7 +1030,8 @@ def resolve_conflict(conflict_id: int, req: schemas.ConflictResolve,
     insights.on_conflict_resolved(db, user, keep, drop)
     db.commit()
     log(db, user.org_id, user.id, "conflict_resolved", f"kept '{keep.subject} {keep.relation} {keep.object}' (fact #{keep.id})")
-    return {"resolved": True, "kept_fact_id": keep.id}
+    flagged = impact.on_fact_superseded(db, user, drop, keep)    # answers built on the losing fact -> needs review
+    return {"resolved": True, "kept_fact_id": keep.id, "answers_flagged": flagged or 0}
 
 
 # --------------------------------------------------------------- tasks -----
@@ -1254,6 +1261,9 @@ def dashboard(user: models.User = Depends(auth.get_current_user), db: Session = 
 
 app.include_router(features.router)
 app.include_router(insights.router)
+app.include_router(impact.router)       # Knowledge Impact + versions + revalidation
+app.include_router(knowledge.router)    # Ask the Organization + related questions + Starting Point
+app.include_router(llm.router)          # optional local model (Ollama), closed-book
 
 
 # ------------------------------------------------------- static files -----

@@ -98,3 +98,18 @@ OCR for scanned files, generative LLM answers, real Google OAuth, 2FA, emailing 
 ## Layout
 `backend/app/`: `main.py` routes, `models.py`, `auth.py`, `retrieval.py` (permission-aware TF-IDF), `graph.py`
 (facts, conflicts, multi-hop), `extract.py` (PDF/DOCX/PPTX text), `features.py` (feature pack 2), `insights.py` (insights pack), `help_bot.py` (isolated help FAQ bot). `frontend/`: `index.html`, `app.js`, `features.js`, `insights.js`, `style.css`, `features.css`, `insights.css`.
+
+## Brain pack (Knowledge Impact + Ask the Organization)
+
+- **Knowledge Impact**: edit a document (document page -> *Edit text*) and Anamnesis first **previews** what the change touches, then on apply
+  marks every answer / verified answer built on the OLD wording as *needs review* (nothing is deleted), tells the people who received it,
+  and gives managers a revalidation queue (*still valid* or *replace*). Every flag has a **why** chain: source -> what changed -> passage -> answer.
+  Superseding a graph fact (resolving a conflict) does the same for answers built on the losing fact. Document **version history + compare** included.
+- **Answer state badge** on every answer: current / verified / may be outdated / needs review / sources disagree / no knowledge.
+- **Ask the Organization**: when nothing answers a question, suggest only people who are *authorized for that knowledge area* (never guessed),
+  send them the question (no documents attached), and let them answer / forward / decline. A second authorized person must verify the answer
+  before it becomes organizational knowledge.
+- **Starting Point** (onboarding: what to read, who to know, good first questions) and **related questions**.
+- **Optional local model** (`app/llm.py`): if Ollama is running (`ollama pull qwen2.5:3b`), *Explain (local model)* rewrites the already-authorized
+  evidence; it is closed-book, abstains when evidence is missing, and removes claims the evidence does not support. Nothing leaves the machine.
+- Upgrading an existing `anamnesis.db` is automatic on first start (new tables + columns are created).

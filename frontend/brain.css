@@ -1,0 +1,23 @@
+/* Brain pack styles (reuses the variables from style.css) */
+.bn-state{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 8px;padding:6px 10px;border-radius:8px;background:#0a0f20;border:1px solid var(--border);font-size:13px}
+.bn-needs_review{border-color:var(--warn)}.bn-conflicting{border-color:var(--danger)}.bn-verified{border-color:var(--success)}
+.bn-actions{margin-top:8px}
+.bn-related{margin-top:8px;padding:8px 10px;border-radius:8px;background:#0a0f20;border:1px dashed var(--border);font-size:13px}
+.bn-related a{display:block;color:var(--cyan);margin-top:4px}
+.bn-expert{border-top:1px solid var(--border);padding:8px 0;font-size:14px}
+.bn-expert button{margin-top:6px}
+.bn-step{padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:#0a0f20;font-size:13px}
+.bn-step b{display:block;margin-bottom:2px}
+.bn-arrow{text-align:center;color:var(--text-dim)}
+.bn-diff{margin:6px 0;font-size:13px;line-height:1.5}
+.bn-diff del{display:block;color:var(--danger);background:rgba(248,113,113,.08);padding:3px 6px;border-radius:4px}
+.bn-diff ins{display:block;color:var(--success);background:rgba(74,222,128,.08);padding:3px 6px;border-radius:4px;text-decoration:none;margin-top:2px}
+.bn-chip{display:inline-block;margin:2px 6px 2px 0;padding:1px 9px;border-radius:999px;border:1px solid var(--border);font-size:12px;color:var(--text-dim)}
+.bn-chip.on{color:var(--warn);border-color:var(--warn)}
+.bn-h{margin:14px 0 6px;color:var(--text-dim);font-size:12px;text-transform:uppercase;letter-spacing:.05em}
+.bn-list{margin:0 0 0 18px;padding:0;font-size:13px}
+.bn-prev{margin-top:10px}
+.bn-panel{margin:10px 0;padding:8px 12px;border:1px solid var(--border);border-radius:10px;background:var(--bg-card)}
+.bn-item{border-top:1px solid var(--border);padding:10px 0;font-size:14px}
+.bn-item:first-of-type{border-top:0}
+.bn-old{color:var(--text-dim);font-size:13px;margin-top:2px}
