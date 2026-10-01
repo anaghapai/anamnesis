@@ -2,14 +2,20 @@
 (one chain per organization). Editing or deleting an old row breaks every hash after it, and GET /audit/verify
 shows exactly where. Also: CSV export of the filtered log.
 
-Honest limits: someone with full database access could recompute the whole chain, and removing the very last
-rows cannot be detected unless you have noted the head hash earlier. Rows written before this feature existed
-have no hash and are reported as 'unprotected', not hidden.
+Head anchor: every successful verify saves the newest hash and the row count to audit_anchor.json, a file OUTSIDE
+the database. The next verify fails if that head is no longer where it was, so deleting only the newest rows is now
+detected. You can also paste a head hash you noted earlier (GET /audit/verify?noted_head=...).
+
+Honest limits: someone with full database access could recompute the whole chain, and someone who can also edit
+or delete audit_anchor.json can reset the anchor, so keep a copy of the head hash somewhere off the server (notes,
+a screenshot). Rows written before this feature existed have no hash and are reported as 'unprotected', not hidden.
 """
 import csv
 import datetime
 import hashlib
 import io
+import json
+import os
 import threading
 from typing import Optional
 
@@ -24,6 +30,8 @@ from .auditview import _day, category_of, label_of, ORDER
 from .db import get_db
 
 router = APIRouter()
+_APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))          # the backend folder
+ANCHOR_FILE = os.environ.get("ANAMNESIS_AUDIT_ANCHOR") or os.path.join(_APP_DIR, "audit_anchor.json")
 _LOCK = threading.Lock()          # keeps two requests from writing the same "previous hash" at the same moment
 
 
@@ -73,11 +81,58 @@ def _release(session, transaction):
             pass
 
 
+def _load_anchors():
+    try:
+        with open(ANCHOR_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError):
+        return None                       # unreadable or corrupt: report it, never silently replace it
+
+
+def _save_anchors(data):
+    tmp = ANCHOR_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+    os.replace(tmp, ANCHOR_FILE)
+
+
+def _check_anchor(org_id, hashes):
+    """Compare the chain with the head saved by an earlier verify. Returns (anchor_info, failure_reason or None)."""
+    key = str(org_id)
+    anchors = _load_anchors()
+    if anchors is None:
+        return {"status": "unavailable", "detail": "audit_anchor.json is unreadable; fix or delete it"}, None
+    old = anchors.get(key)
+    now = datetime.datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    if old:
+        n, head = int(old.get("count", 0)), old.get("head")
+        if len(hashes) < n or (n and hashes[n - 1] != head):
+            return {"status": "mismatch", "saved_rows": n, "saved_at": old.get("saved_at"), "current_rows": len(hashes)}, (
+                f"The head saved on {old.get('saved_at', 'an earlier check')} ({n} rows) is no longer in the chain: "
+                "the newest rows were removed or the chain was rebuilt. If you deliberately reset the database, "
+                "delete audit_anchor.json in the backend folder and verify again")
+        if len(hashes) == n:
+            return {"status": "matches", "saved_rows": n, "saved_at": old.get("saved_at"), "new_rows": 0}, None
+    if hashes:
+        anchors[key] = {"count": len(hashes), "head": hashes[-1], "saved_at": now}
+        try:
+            _save_anchors(anchors)
+        except OSError:
+            return {"status": "unavailable", "detail": "could not write audit_anchor.json"}, None
+    status = "advanced" if old else "created"
+    return {"status": status, "saved_rows": len(hashes), "saved_at": now,
+            "new_rows": len(hashes) - int(old.get("count", 0)) if old else None}, None
+
+
 @router.get("/audit/verify")
-def verify(user: models.User = Depends(auth.require_role("manager")), db: Session = Depends(get_db)):
+def verify(noted_head: Optional[str] = Query(None, max_length=64),
+           user: models.User = Depends(auth.require_role("manager")), db: Session = Depends(get_db)):
     rows = db.query(models.AuditLog).filter(models.AuditLog.org_id == user.org_id).order_by(models.AuditLog.id).all()
     legacy = sum(1 for r in rows if r.row_hash is None and not _after_chain_start(rows, r))
-    prev, checked, started = "", 0, False
+    prev, checked, started, hashes = "", 0, False, []
     for r in rows:
         if r.row_hash is None:
             if started:
@@ -89,8 +144,23 @@ def verify(user: models.User = Depends(auth.require_role("manager")), db: Sessio
         if digest(r.prev_hash, r.org_id, r.user_id, r.action, r.detail, r.created_at) != r.row_hash:
             return _bad(r, checked, legacy, "This row's content no longer matches its hash (it was edited)")
         prev, checked = r.row_hash, checked + 1
+        hashes.append(r.row_hash)
+    noted = (noted_head or "").strip().lower()
+    noted_info = None
+    if noted:
+        if len(noted) < 12 or any(c not in "0123456789abcdef" for c in noted):
+            raise HTTPException(400, "Noted head hash must be at least 12 hex characters")
+        hit = next((i for i, h in enumerate(hashes) if h.startswith(noted)), None)
+        if hit is None:
+            return _bad(None, checked, legacy, "The head hash you noted is not in the chain: the newest rows were "
+                        "removed, or the chain was rebuilt after you noted it")
+        noted_info = {"found_at_row": hit + 1, "rows_after_it": len(hashes) - hit - 1}
+    anchor, why = _check_anchor(user.org_id, hashes)
+    if why:
+        return {"ok": False, "checked": checked, "unprotected_older_rows": legacy, "broken_at": None, "reason": why,
+                "head": None, "head_full": None, "anchor": anchor, "noted": None}
     return {"ok": True, "checked": checked, "unprotected_older_rows": legacy, "broken_at": None, "reason": None,
-            "head": prev[:16] if prev else None}
+            "head": prev[:16] if prev else None, "head_full": prev or None, "anchor": anchor, "noted": noted_info}
 
 
 def _after_chain_start(rows, r):
@@ -101,7 +171,8 @@ def _after_chain_start(rows, r):
 
 
 def _bad(r, checked, legacy, why):
-    return {"ok": False, "checked": checked, "unprotected_older_rows": legacy, "broken_at": r.id, "reason": why, "head": None}
+    return {"ok": False, "checked": checked, "unprotected_older_rows": legacy, "broken_at": r.id if r is not None else None,
+            "reason": why, "head": None, "head_full": None, "anchor": None, "noted": None}
 
 
 def _safe(v):

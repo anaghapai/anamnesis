@@ -121,4 +121,11 @@ for i, c in enumerate(retrieval.chunk_text(personal.content)):
 db.add(models.Note(org_id=org.id, user_id=intern.id, kind="checklist", title="First-week checklist",
                    body='[{"t":"Get laptop imaged","done":true},{"t":"VPN profile","done":false},{"t":"Meet Meera 1:1","done":false}]'))
 db.commit()
+# A brand-new database starts a brand-new audit chain, so an old saved head hash no longer applies.
+try:
+    from app.auditchain import ANCHOR_FILE
+    if os.path.exists(ANCHOR_FILE):
+        os.remove(ANCHOR_FILE)
+except Exception:
+    pass
 print("Seeded 'Cipher Labs'. See the docstring at the top of seed.py for logins and the demo story.")

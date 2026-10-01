@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
-from . import models, schemas, auth, retrieval, graph, extract, features, insights, impact, knowledge, llm, orgsearch, auditview, auditchain
+from . import models, schemas, auth, retrieval, graph, extract, features, insights, impact, knowledge, llm, orgsearch, auditview, auditchain, evidence
 from .db import engine, get_db, SessionLocal
 
 models.Base.metadata.create_all(bind=engine)
@@ -1303,6 +1303,7 @@ app.include_router(llm.router)          # optional local model (Ollama), closed-
 app.include_router(orgsearch.router)   # permission-aware search + filters
 app.include_router(auditview.router)   # audit log: categories, filters, detail
 app.include_router(auditchain.router)   # audit log: tamper-evident chain check + CSV export
+app.include_router(evidence.router)      # Evidence Map, Search vs Anamnesis, graph data
 
 
 # ------------------------------------------------------- static files -----

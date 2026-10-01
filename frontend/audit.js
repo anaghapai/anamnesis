@@ -43,6 +43,7 @@
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
           <button class="btn-secondary" id="au-verify-btn">Verify integrity</button>
+          <input type="text" id="au-noted" placeholder="Head hash you noted earlier (optional)" aria-label="Head hash you noted earlier" style="min-width:240px;flex:1;max-width:360px" maxlength="64">
           <button class="btn-secondary" id="au-export">Export CSV</button>
         </div>
         <div id="au-verify" class="au-verify hidden" role="status"></div>
@@ -85,14 +86,23 @@
     const box = $("au-verify");
     box.className = "au-verify"; box.textContent = "Checking every row...";
     try {
-      const v = await api("/audit/verify");
+      const noted = ($("au-noted").value || "").trim();
+      const v = await api("/audit/verify" + (noted ? "?noted_head=" + encodeURIComponent(noted) : ""));
       const old = v.unprotected_older_rows ? ` ${v.unprotected_older_rows} older row(s) were written before hash-chaining existed and cannot be checked.` : "";
       if (v.ok) {
+        const a = v.anchor || {};
+        let anchorMsg = "";
+        if (a.status === "created") anchorMsg = " Head saved outside the database for the next check.";
+        else if (a.status === "matches") anchorMsg = ` Matches the head saved on ${a.saved_at}: no rows were removed since.`;
+        else if (a.status === "advanced") anchorMsg = ` ${a.new_rows} new row(s) since the last check; saved head updated.`;
+        else if (a.status === "unavailable") anchorMsg = " Could not use the saved head file (" + (a.detail || "unavailable") + ").";
+        const n = v.noted ? ` Your noted head is row ${v.noted.found_at_row} of the chain (${v.noted.rows_after_it} newer).` : "";
         box.className = "au-verify ok";
-        box.textContent = `Chain intact. ${v.checked} protected row(s) checked, none edited or removed.` + (v.head ? ` Head: ${v.head}` : "") + old;
+        box.textContent = `Chain intact. ${v.checked} protected row(s) checked, none edited or removed.` + anchorMsg + n
+          + (v.head_full ? ` Head hash (note it somewhere off this server): ${v.head_full}` : "") + old;
       } else {
         box.className = "au-verify bad";
-        box.textContent = `Chain broken at event #${v.broken_at}. ${v.reason}.` + old;
+        box.textContent = (v.broken_at ? `Chain broken at event #${v.broken_at}. ` : "Chain check failed. ") + v.reason + "." + old;
       }
     } catch (e) { box.className = "au-verify bad"; box.textContent = "Could not verify: " + e.message; }
   }

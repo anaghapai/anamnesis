@@ -1,4 +1,8 @@
-@import url('https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&display=swap');
+/* Schibsted Grotesk is bundled in frontend/fonts (SIL Open Font License), so the theme works fully offline. */
+@font-face{font-family:'Schibsted Grotesk';font-style:normal;font-weight:400;font-display:swap;src:url('fonts/schibsted-grotesk-latin-400-normal.woff2') format('woff2')}
+@font-face{font-family:'Schibsted Grotesk';font-style:normal;font-weight:500;font-display:swap;src:url('fonts/schibsted-grotesk-latin-500-normal.woff2') format('woff2')}
+@font-face{font-family:'Schibsted Grotesk';font-style:normal;font-weight:600;font-display:swap;src:url('fonts/schibsted-grotesk-latin-600-normal.woff2') format('woff2')}
+@font-face{font-family:'Schibsted Grotesk';font-style:normal;font-weight:700;font-display:swap;src:url('fonts/schibsted-grotesk-latin-700-normal.woff2') format('woff2')}
 /* Anamnesis theme v2. Load AFTER style.css. Same palette and landing background as theme.css. */
 :root{--bg:#040907!important;--bg-panel:#08110d!important;--bg-card:#0b1511!important;--border:#1a2b22!important;
 --cyan:#34d399!important;--purple:#86efac!important;--text:#f1f7f3!important;--text-dim:#8b9a92!important;--success:#4ade80!important}

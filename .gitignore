@@ -3,6 +3,8 @@ __pycache__/
 *.py[cod]
 *.db
 *.sqlite3
+audit_anchor.json
+audit_anchor.json.tmp
 .env
 .pytest_cache/
 .DS_Store
