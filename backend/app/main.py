@@ -922,6 +922,12 @@ def resolve_review(qa_id: int, req: schemas.ReviewRequest,
         raise HTTPException(400, "verdict must be approve, correct or reject")
     qa.reviewer_id, qa.review_note, qa.reviewed_at = user.id, req.note, datetime.datetime.utcnow()
 
+    doc_res, doc_msg = None, ""
+    if req.doc_edit and req.verdict == "correct":
+        doc_res = impact.propose_source_fix(db, user, qa, req.doc_edit)
+        doc_msg = (f" The source document '{doc_res['title']}' was updated to v{doc_res['version']}." if doc_res["applied"]
+                   else f" A correction to '{doc_res['title']}' is waiting for the document owner's approval.")
+
     fact_msg = ""
     if req.fact and req.fact.subject and req.fact.relation and req.fact.object:
         _, conflict = graph.add_fact(db, user, req.fact.subject, req.fact.relation, req.fact.object)
@@ -929,12 +935,14 @@ def resolve_review(qa_id: int, req: schemas.ReviewRequest,
 
     label = {"approve": "verified", "correct": "corrected", "reject": "marked wrong"}[req.verdict]
     insights.on_review_resolved(db, user, qa, req.verdict)
+    if doc_res and doc_res["applied"]:
+        qa.impact_status = qa.impact_reason = None
     notify(db, user.org_id, user.id, qa.user_id, "review_result",
            f"{user.name} {label} your question \"{qa.question}\"."
-           + (f" Correct answer: {qa.corrected_answer}" if qa.corrected_answer else "") + fact_msg, qa_id=qa.id)
+           + (f" Correct answer: {qa.corrected_answer}" if qa.corrected_answer else "") + fact_msg + doc_msg, qa_id=qa.id)
     db.commit()
     log(db, user.org_id, user.id, "answer_reviewed", f"#{qa.id} {req.verdict}: {qa.question}")
-    return {"status": qa.status}
+    return {"status": qa.status, "document": doc_res}
 
 
 # ------------------------------------------------------ work updates -----

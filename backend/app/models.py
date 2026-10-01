@@ -282,6 +282,24 @@ class DocAccessRequest(Base):
     created_at = Column(DateTime, default=now)
 
 
+class DocFindRequest(Base):
+    """Cross-department request by DESCRIPTION. The requester can't see the other department's
+    document list, so they describe what they need; the approver picks the matching document(s)."""
+    __tablename__ = "doc_find_requests"
+    id = Column(Integer, primary_key=True)
+    org_id = Column(Integer, ForeignKey("organizations.id"), nullable=False)
+    requester_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    department = Column(String, nullable=False)
+    description = Column(Text, nullable=False)
+    reason = Column(Text, default="")
+    days = Column(Integer, default=1)                     # 1 | 7 | 30
+    status = Column(String, default="pending")            # pending | approved | denied
+    decided_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    decided_at = Column(DateTime, nullable=True)
+    granted_ids = Column(Text, default="")                # comma separated document ids the approver picked
+    created_at = Column(DateTime, default=now)
+
+
 class JitToken(Base):
     """Short-lived, one-time access link for a sensitive document."""
     __tablename__ = "jit_tokens"

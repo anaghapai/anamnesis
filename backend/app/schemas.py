@@ -108,11 +108,19 @@ class FactIn(BaseModel):
     object: str
 
 
+class DocEditIn(BaseModel):
+    """Optional: also fix the wording in the source document the wrong answer came from."""
+    document_id: int
+    old_text: str
+    new_text: str
+
+
 class ReviewRequest(BaseModel):
     verdict: str                        # approve | correct | reject
     corrected_answer: Optional[str] = None
     note: Optional[str] = None
     fact: Optional[FactIn] = None       # optionally write the corrected fact to the graph
+    doc_edit: Optional[DocEditIn] = None  # optionally correct the source document too (new version)
 
 
 class UpdateCreate(BaseModel):

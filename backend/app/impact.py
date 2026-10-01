@@ -466,18 +466,26 @@ def edit_content(doc_id: int, req: ContentIn, user: models.User = Depends(auth.g
     if req.preview:
         return {"applied": False, "preview": True, "analysis": analysis}
 
+    ev = _write_version(db, user, d, new, version, req.note, analysis)
+    db.commit()
+    return {"applied": True, "version": version, "event_id": ev.id, "analysis": analysis}
+
+
+def _write_version(db, user, d, new, version, note, analysis):
+    """Store the new text as a new version (v1 = the original is kept), re-chunk, flag affected answers.
+    Does not commit."""
     if not _version_rows(db, d.id):                       # first managed edit: keep the original as v1
         db.add(models.DocumentVersion(org_id=d.org_id, document_id=d.id, version=1, title=d.title, content=d.content,
                                       changed_by=d.uploaded_by, note="Original text", created_at=d.created_at))
     db.add(models.DocumentVersion(org_id=d.org_id, document_id=d.id, version=version, title=d.title, content=new,
-                                  changed_by=user.id, note=(req.note or "").strip() or "Edited"))
+                                  changed_by=user.id, note=(note or "").strip() or "Edited"))
     d.content = new
     d.last_reviewed_at, d.last_reviewed_by = _now(), user.id
     db.query(models.Chunk).filter_by(document_id=d.id).delete()
     for i, c in enumerate(retrieval.chunk_text(new)):
         db.add(models.Chunk(document_id=d.id, org_id=d.org_id, text=c, order_index=i))
     ev = models.ImpactEvent(org_id=d.org_id, kind="document", document_id=d.id, version=version,
-                            title=f"{d.title} → v{version}", note=(req.note or "").strip() or None,
+                            title=f"{d.title} → v{version}", note=(note or "").strip() or None,
                             analysis="{}", created_by=user.id)
     db.add(ev)
     db.flush()
@@ -485,8 +493,63 @@ def edit_content(doc_id: int, req: ContentIn, user: models.User = Depends(auth.g
     analysis["event_id"] = ev.id
     ev.analysis = json.dumps(analysis)
     _log(db, user.org_id, user.id, "document_edit", f"'{d.title}' v{version}; {n} answer(s) flagged for review")
-    db.commit()
-    return {"applied": True, "version": version, "event_id": ev.id, "analysis": analysis}
+    return ev
+
+
+def apply_content_edit(db, user, d, new, note):
+    """Used by the review flow and by the owner's approval: new version of the document, no commit."""
+    version = _current_version(db, d.id) + 1
+    analysis = analyze_document(db, user, d, d.content, new, version)
+    _write_version(db, user, d, new, version, note, analysis)
+    return version
+
+
+def _is_doc_owner(user, d) -> bool:
+    return user.id in (d.owner_id, d.uploaded_by) or auth.rank(user) >= ADMIN
+
+
+def propose_source_fix(db, user, qa, edit) -> dict:
+    """A reviewer corrected an answer and also wants the source document fixed.
+    - document's owner (or an admin): the change is applied now as a NEW version (history kept)
+    - anyone else: it becomes a pending request that the owner / an admin must approve (dual control)
+    Nothing is committed here."""
+    d = db.get(models.Document, edit.document_id)
+    if not d or d.org_id != user.org_id or d.deleted_at is not None or _ws(d) != "company":
+        raise HTTPException(404, "Document not found")
+    if edit.document_id not in {s.get("document_id") for s in _sources(qa)}:
+        raise HTTPException(400, "That document is not a source of this answer")
+    old, new = (edit.old_text or "").strip(), (edit.new_text or "").strip()
+    if not old or not new:
+        raise HTTPException(400, "Give both the old wording and the new wording")
+    if old == new:
+        raise HTTPException(400, "The old and new wording are the same")
+    n = (d.content or "").count(old)
+    if n == 0:
+        raise HTTPException(400, "The old wording was not found in the document. Copy it exactly as it appears.")
+    if n > 1:
+        raise HTTPException(400, f"That wording appears {n} times in the document. Use a longer passage so it is unique.")
+    new_content = d.content.replace(old, new, 1)
+    if len(new_content.strip()) < 10:
+        raise HTTPException(400, "The document text can't be empty")
+    note = f"Corrected after review of: {qa.question[:120]}"
+    if _is_doc_owner(user, d) and can_edit(user, d):
+        version = apply_content_edit(db, user, d, new_content, note)
+        qa.impact_status = qa.impact_reason = None         # this answer is the corrected one
+        return {"applied": True, "pending": False, "version": version, "title": d.title, "document_id": d.id}
+    dc = models.DualControl(org_id=user.org_id, document_id=d.id, action="content_edit", requested_by=user.id,
+                            payload=json.dumps({"old_text": old, "new_text": new, "qa_id": qa.id,
+                                                "question": qa.question[:200]}))
+    db.add(dc)
+    approvers = {x for x in (d.owner_id, d.uploaded_by) if x and x != user.id}
+    for a in db.query(models.User).filter_by(org_id=user.org_id, active=True):
+        if auth.rank(a) >= ADMIN and a.id != user.id:
+            approvers.add(a.id)
+    for uid in approvers:
+        _notify(db, user.org_id, user.id, uid, "review_request",
+                f"{user.name} wants to correct the wording in '{d.title}'. Approve it in Approvals.", document_id=d.id)
+    _log(db, user.org_id, user.id, "dual_control_requested", f"correct wording in '{d.title}'")
+    return {"applied": False, "pending": True, "title": d.title, "document_id": d.id,
+            "message": f"The answer is corrected. The change to '{d.title}' needs the document owner's approval."}
 
 
 @router.get("/documents/{doc_id}/versions")

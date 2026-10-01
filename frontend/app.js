@@ -68,7 +68,7 @@ function showView(name) {
   document.querySelectorAll(".nav-item").forEach(b => b.classList.toggle("active", b.dataset.view === name));
   document.querySelectorAll(".view").forEach(v => v.classList.toggle("active", v.id === "view-" + name));
   ({ dashboard: loadDashboard, mywork: loadMyWork, ask: initAsk,
-     documents: () => { loadDocuments(); loadAccessRequests(); },
+     documents: () => { loadDocuments(); },
      graph: loadGraph, conflicts: loadConflicts, reviews: loadReviews, people: loadPeople,
      settings: loadSettings, audit: loadAudit, account: loadAccount, ...(window.FEATURE_VIEWS || {}) }[name] || (() => {}))();
 }
@@ -477,33 +477,6 @@ async function openDoc(id, hl) {
   } catch (err) { alert(err.message); }
 }
 
-// ----------------------------------------------------- cross-dept access ---
-async function loadAccessRequests() {
-  fillSelect($("acc-dept"), ME.departments.filter(d => d !== ME.department && d !== "All"));
-  const r = await api("/access-requests");
-  $("acc-mine").innerHTML = r.mine.length ? "<h3>Your requests</h3>" + r.mine.map(a =>
-    `<div class="conflict-card"><strong>${esc(a.department)}</strong> — ${a.status}
-      ${a.reason ? `<div class="view-sub" style="margin:2px 0 0;font-size:12px">${esc(a.reason)}</div>` : ""}</div>`).join("") : "";
-  $("acc-review-wrap").classList.toggle("hidden", !r.for_review.length);
-  $("acc-review").innerHTML = r.for_review.map(a =>
-    `<div class="conflict-card"><strong>${esc(a.requester)}</strong> wants ${a.duration_hours}h access to <strong>${esc(a.department)}</strong>
-      ${a.reason ? `<div class="view-sub" style="margin:2px 0 6px;font-size:12px">${esc(a.reason)}</div>` : ""}
-      <div class="action-row"><button class="btn-primary" onclick="decideAccess(${a.id},true)">Approve</button>
-      <button class="btn-ghost" onclick="decideAccess(${a.id},false)">Deny</button></div></div>`).join("");
-}
-$("acc-request-btn").addEventListener("click", async () => {
-  try {
-    await api("/access-requests", { method: "POST", body: JSON.stringify({
-      department: $("acc-dept").value, reason: $("acc-reason").value, duration_hours: Number($("acc-hours").value) || 24 }) });
-    $("acc-reason").value = ""; msg("acc-error", "");
-    loadAccessRequests();
-  } catch (err) { msg("acc-error", err.message); }
-});
-async function decideAccess(id, approve) {
-  try { await api(`/access-requests/${id}/decide`, { method: "POST", body: JSON.stringify({ approve }) }); loadAccessRequests(); }
-  catch (err) { alert(err.message); }
-}
-
 // ---------------------------------------------------------------- graph ---
 $("new-fact-btn").addEventListener("click", () => $("fact-form").classList.toggle("hidden"));
 $("fact-cancel-btn").addEventListener("click", () => $("fact-form").classList.add("hidden"));
@@ -572,6 +545,7 @@ async function loadReviews() {
         <input type="text" id="rev-o-${r.id}" placeholder="object">
       </div>
       <input type="text" id="rev-note-${r.id}" placeholder="Note to the asker (optional)" style="margin-top:8px">
+      ${revDocBlock(r)}
       <div class="action-row">
         <button class="btn-primary" onclick="review(${r.id},'correct')">✏️ Submit correction</button>
         <button class="btn-secondary" onclick="review(${r.id},'approve')">✅ Answer was right</button>
@@ -579,12 +553,53 @@ async function loadReviews() {
       </div><div class="auth-error" id="rev-msg-${r.id}"></div></div>`).join("")
     : "<div class='empty-note'>Nothing waiting for review. 🎉</div>";
 }
+const REV_DOCS = {};   // review id -> cited passages (document_id, title, text)
+function revDocBlock(r) {
+  const seen = new Set(), opts = [];
+  for (const s of r.sources) {
+    if (!s.document_id || seen.has(s.document_id)) continue;
+    seen.add(s.document_id); opts.push(s);
+  }
+  REV_DOCS[r.id] = opts;
+  if (!opts.length) return "";
+  return `<div class="rev-doc">
+    <label class="dfind-opt"><input type="checkbox" id="rev-doc-on-${r.id}" onchange="revDocToggle(${r.id})">
+      <span><b>Also correct the source document</b> (saved as a new version, old versions are kept)</span></label>
+    <div id="rev-doc-box-${r.id}" class="hidden">
+      <select id="rev-doc-sel-${r.id}" onchange="revDocFill(${r.id})">${opts.map(o => `<option value="${o.document_id}">${esc(o.document_title)}</option>`).join("")}</select>
+      <label class="muted" for="rev-doc-old-${r.id}">Wording in the document to replace (edit it to the exact part)</label>
+      <textarea rows="2" id="rev-doc-old-${r.id}"></textarea>
+      <label class="muted" for="rev-doc-new-${r.id}">New wording</label>
+      <textarea rows="2" id="rev-doc-new-${r.id}" placeholder="e.g. The VPN password rotates every 45 days."></textarea>
+      <div class="muted">If you are not the document's owner, the change waits for the owner's approval. The answer itself is corrected right away.</div>
+    </div></div>`;
+}
+function revDocFill(id) {
+  const docId = Number($(`rev-doc-sel-${id}`).value);
+  const s = (REV_DOCS[id] || []).find(o => o.document_id === docId);
+  $(`rev-doc-old-${id}`).value = s ? (s.text || "") : "";
+}
+function revDocToggle(id) {
+  const on = $(`rev-doc-on-${id}`).checked;
+  $(`rev-doc-box-${id}`).classList.toggle("hidden", !on);
+  if (on) revDocFill(id);
+}
 async function review(id, verdict) {
   const s = $(`rev-s-${id}`).value, r = $(`rev-r-${id}`).value, o = $(`rev-o-${id}`).value;
   const body = { verdict, corrected_answer: $(`rev-ans-${id}`).value, note: $(`rev-note-${id}`).value,
     fact: s && r && o ? { subject: s, relation: r, object: o } : null };
-  try { await api(`/reviews/${id}`, { method: "POST", body: JSON.stringify(body) }); loadReviews(); refreshPills(); }
-  catch (err) { msg(`rev-msg-${id}`, err.message); }
+  const on = $(`rev-doc-on-${id}`);
+  if (on && on.checked && verdict === "correct") {
+    body.doc_edit = { document_id: Number($(`rev-doc-sel-${id}`).value),
+      old_text: $(`rev-doc-old-${id}`).value, new_text: $(`rev-doc-new-${id}`).value };
+  }
+  try {
+    const res = await api(`/reviews/${id}`, { method: "POST", body: JSON.stringify(body) });
+    if (res.document) alert(res.document.applied
+      ? `Done. '${res.document.title}' is now version ${res.document.version}. You can see older versions in the document's Versions button.`
+      : res.document.message);
+    loadReviews(); refreshPills();
+  } catch (err) { msg(`rev-msg-${id}`, err.message); }
 }
 
 // ------------------------------------------------------------- my work ---

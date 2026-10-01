@@ -32,9 +32,7 @@
       <button type="submit" class="btn-primary">Log in</button>
       <div class="auth-error" id="login-error"></div>
       <div class="demo-hint">
-        Employees: your admin gives you a username and password — there is no self-signup.<br><br>
-        Demo (password <code>demo1234</code>): <code>asha</code> owner · <code>rahul</code> Eng manager ·
-        <code>meera</code> IT manager · <code>priya</code> IT intern · <code>kabir</code> HR
+        Employees: your admin gives you a username and password — there is no self-signup.
       </div>
     </form>
 
@@ -87,13 +85,6 @@
     <section id="view-dashboard" class="view active">
       <h2>Dashboard</h2>
       <div class="stat-grid" id="stat-grid"></div>
-      <div class="hint-card">
-        <strong>Feedback-loop demo:</strong> log in as <code>priya</code> (IT intern) → Ask
-        <em>"how often does the vpn password rotate"</em> → the answer comes from a 120-day-old doc
-        (marked stale) → <strong>Flag as wrong</strong>. Log in as <code>meera</code> (IT manager) →
-        <strong>Reviews</strong> → write the correction. Log back in as <code>priya</code> and ask again:
-        the verified answer now comes first.
-      </div>
     </section>
 
     <section id="view-mywork" class="view">
@@ -196,30 +187,26 @@
       <div id="doc-list"></div>
 
       <div class="view-header-row" style="margin-top:22px"><h3 style="margin:0">Cross-department access</h3></div>
-      <p class="view-sub">You only see your own department's documents by default. Ask the department's manager (or an admin/owner) for temporary access to another one.</p>
+      <p class="view-sub">You only see your own department's documents by default. To get something from another department, just describe what you need. The department's approver sees your description, picks the matching document and gives you time-limited access (1, 7 or 30 days). Access expires by itself.</p>
       <div class="card">
-        <div class="row-gap">
-          <select id="acc-dept"></select>
-          <input type="text" id="acc-reason" placeholder="Reason (optional)">
-          <input type="number" id="acc-hours" value="24" min="1" max="720" style="max-width:90px" title="Hours">
-          <button class="btn-primary" id="acc-request-btn">Request access</button>
+        <div class="req-form">
+          <div><label for="dfind-dept">Which department has it?</label><select id="dfind-dept"></select></div>
+          <div><label for="dfind-days">Access for</label><select id="dfind-days"><option value="1">1 day</option><option value="7">7 days</option><option value="30">30 days</option></select></div>
+          <div class="span2"><label for="dfind-desc">Describe the document</label><input type="text" id="dfind-desc" maxlength="300" placeholder="e.g. Q3 sales forecast, vendor contract template, onboarding checklist"></div>
+          <div class="span2"><label for="dfind-reason">Why do you need it? (optional)</label><input type="text" id="dfind-reason" maxlength="500" placeholder="e.g. preparing the budget review"></div>
+          <div class="span2"><button class="btn-primary" id="dfind-btn" style="margin:0">Send request</button></div>
         </div>
-        <div class="auth-error" id="acc-error"></div>
+        <div class="auth-error" id="dfind-msg"></div>
       </div>
-      <div id="acc-mine"></div>
-      <div id="acc-review-wrap" class="hidden">
-        <h3>Requests waiting on you</h3>
-        <div id="acc-review"></div>
-      </div>
-
-      <div class="view-header-row" style="margin-top:22px"><h3 style="margin:0">Request access to one document</h3></div>
-      <p class="view-sub">Got a link or document number you can't open? Ask for time-limited access (1, 7 or 30 days). The owner or manager decides, and access expires by itself.</p>
-      <div class="card">
-        <div class="row-gap">
-          <input type="number" id="dacc-id" placeholder="Document #" min="1" style="max-width:130px">
-          <input type="text" id="dacc-reason" placeholder="Reason">
-          <select id="dacc-days" style="max-width:110px"><option value="1">1 day</option><option value="7">7 days</option><option value="30">30 days</option></select>
-          <button class="btn-primary" id="dacc-btn">Request</button>
+      <div id="dfind-mine"></div>
+      <div id="dfind-review-wrap" class="hidden"><h3>Document requests waiting on you</h3><div id="dfind-review"></div></div>
+      <div class="card hidden" id="dacc-link-card">
+        <b>Request access to the document you were sent a link to</b>
+        <div class="req-form" style="margin-top:8px">
+          <div><label for="dacc-id">Document number</label><input type="number" id="dacc-id" min="1" readonly></div>
+          <div><label for="dacc-days">Access for</label><select id="dacc-days"><option value="1">1 day</option><option value="7">7 days</option><option value="30">30 days</option></select></div>
+          <div class="span2"><label for="dacc-reason">Reason</label><input type="text" id="dacc-reason" placeholder="Reason"></div>
+          <div class="span2"><button class="btn-primary" id="dacc-btn" style="margin:0">Request</button></div>
         </div>
         <div class="auth-error" id="dacc-msg"></div>
       </div>

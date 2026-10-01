@@ -83,7 +83,7 @@ Everything below is plain rules and arithmetic (no generative model), and every 
 | kabir | hr@demo.org | member | HR |
 
 ## Demo script
-(A timed 3 to 5 minute version is in `DEMO_SCRIPT.md`.)
+(The timed 3-minute spoken script, with exact words and what to show on screen, is in `DEMO_SCRIPT.md`. A plain-English guide to every feature is in `FEATURES.md`.)
 1. `priya` asks "how often does the vpn password rotate" -> old answer marked 120 days old -> **Flag**.
 2. `meera` -> **Reviews** -> writes the correction (+ optional fact) -> Submit.
 3. `priya` asks again -> verified answer comes first; her inbox in **My Work** shows the result.
@@ -139,7 +139,7 @@ OCR for scanned files, generative LLM answers, real Google OAuth, 2FA, emailing 
 ## Tests
 ```powershell
 cd backend
-python -m pytest tests -q -p no:warnings          # expect 106 passed (API, permissions, audit chain and head anchor, evidence)
+python -m pytest tests -q -p no:warnings          # expect 110 passed (API, permissions, audit chain and head anchor, evidence)
 ```
 Browser smoke test (real Chromium, own temporary database, never touches yours):
 ```powershell

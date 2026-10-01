@@ -30,7 +30,7 @@ window.afterBoot = async function (forcePw) {
   } else {
     try { await api(`/documents/${doc}`); openDoc(Number(doc)); }
     catch {
-      showView("documents"); $("dacc-id").value = doc;
+      showView("documents"); $("dacc-link-card").classList.remove("hidden"); $("dacc-id").value = doc;
       msg("dacc-msg", `You can't open document #${doc}. Fill in a reason and press Request to ask for access.`);
       $("dacc-id").scrollIntoView({ behavior: "smooth", block: "center" });
     }
@@ -59,7 +59,7 @@ window.decorateAnswer = function (m, h) {
 
 // -------------------------------------------------------- document list ---
 window.decorateDocs = async function (docs) {
-  loadDocAccess().catch(() => {});
+  loadDocAccess().catch(() => {}); loadDocFind().catch(() => {});
   try { DOC_META = await api("/documents-meta"); } catch { DOC_META = {}; }
   const rows = [...document.querySelectorAll("#doc-list .doc-row")];
   const decorated = rows.map((row, i) => ({ row, d: docs[i] })).filter(x => x.d);
@@ -156,10 +156,54 @@ window.givePermanent = safe(async id => {
 // ------------------------------------------------ per-document access (Documents page) ---
 $("dacc-btn").addEventListener("click", safe(async () => {
   msg("dacc-msg", "");
-  const id = Number($("dacc-id").value); if (!id) return msg("dacc-msg", "Enter the document number");
+  const id = Number($("dacc-id").value); if (!id) return;
   const r = await api("/doc-access-requests", { method: "POST", body: JSON.stringify({ document_id: id, reason: $("dacc-reason").value, days: Number($("dacc-days").value) }) });
   msg("dacc-msg", r.message, true); loadDocAccess();
 }));
+$("dfind-btn").addEventListener("click", safe(async () => {
+  msg("dfind-msg", "");
+  const desc = $("dfind-desc").value.trim();
+  if (!$("dfind-dept").value) return msg("dfind-msg", "Choose a department");
+  if (desc.length < 3) return msg("dfind-msg", "Describe the document you need");
+  const r = await api("/doc-requests", { method: "POST", body: JSON.stringify({
+    department: $("dfind-dept").value, description: desc, reason: $("dfind-reason").value, days: Number($("dfind-days").value) }) });
+  $("dfind-desc").value = ""; $("dfind-reason").value = "";
+  msg("dfind-msg", r.message, true); loadDocFind();
+}));
+async function loadDocFind() {
+  fillSelect($("dfind-dept"), ME.departments.filter(d => d !== ME.department && d !== "All"));
+  const r = await api("/doc-requests");
+  $("dfind-mine").innerHTML = r.mine.slice(0, 6).map(a => `<div class="doc-row"><b>${esc(a.description)}</b>
+    <span class="badge badge-${a.status === "approved" ? "ok" : a.status === "denied" ? "flagged" : "stale"}">${a.status}</span>
+    <span class="muted">${esc(a.department)} · ${a.days}-day request · ${fdate(a.created_at)}</span>
+    ${(a.documents || []).map(d => ` <a href="#" onclick="openDoc(${d.id});return false">open ${esc(d.title)}</a>`).join("")}</div>`).join("");
+  $("dfind-review-wrap").classList.toggle("hidden", !r.for_review.length);
+  $("dfind-review").innerHTML = r.for_review.map(a => `<div class="doc-row dfind-card" id="dfind-card-${a.id}">
+    <div><b>${esc(a.requester)}</b> from another department needs a <b>${esc(a.department)}</b> document for <b>${a.days} day(s)</b></div>
+    <div class="dfind-desc">"${esc(a.description)}"</div>
+    <div class="muted">${esc(a.reason || "no reason given")}</div>
+    <div class="dfind-pick" id="dfind-pick-${a.id}"><span class="muted">Loading matching documents...</span></div>
+    <div class="action-row">
+      <button class="btn-primary" style="margin:0" onclick="decideDocFind(${a.id},true,${a.days})">Approve selected</button>
+      <button class="btn-ghost" onclick="decideDocFind(${a.id},false)">Deny</button></div></div>`).join("");
+  for (const a of r.for_review) {
+    try {
+      const c = await api(`/doc-requests/${a.id}/candidates`);
+      $(`dfind-pick-${a.id}`).innerHTML = c.documents.length
+        ? `<div class="muted" style="margin-bottom:4px">Pick the document(s) to share:</div>` + c.documents.map(d =>
+          `<label class="dfind-opt"><input type="checkbox" value="${d.id}"${d.match > 0 && d === c.documents[0] ? " checked" : ""}>
+           <span>${esc(d.title)}</span> <span class="badge badge-restricted">${esc(d.visibility)}</span>${d.match > 0 ? ` <span class="badge badge-ok">likely match</span>` : ""}
+           <a href="#" onclick="openDoc(${d.id});return false" class="muted">view</a></label>`).join("")
+        : `<span class="muted">No document in ${esc(a.department)} that you manage and they can't already open. You can only deny.</span>`;
+    } catch (e) { $(`dfind-pick-${a.id}`).textContent = e.message; }
+  }
+}
+window.decideDocFind = safe(async (id, approve, days) => {
+  const ids = [...document.querySelectorAll(`#dfind-pick-${id} input:checked`)].map(x => Number(x.value));
+  if (approve && !ids.length) return alert("Pick the document to give access to first");
+  await api(`/doc-requests/${id}/decide`, { method: "POST", body: JSON.stringify({ approve, document_ids: ids, days }) });
+  loadDocFind(); loadDocAccess();
+});
 async function loadDocAccess() {
   const r = await api("/doc-access-requests");
   $("dacc-mine").innerHTML = r.mine.slice(0, 6).map(a => `<div class="doc-row"><b>${esc(a.title)}</b> <span class="badge badge-${a.status === "approved" ? "ok" : a.status === "denied" ? "flagged" : "stale"}">${a.status}</span>
@@ -273,6 +317,7 @@ async function loadApprovals() {
     <button class="btn-ghost danger" onclick="apprDecide(${d.id},'reject')">Reject</button></div><div id="appr-read-${d.id}"></div></div>`).join("")
     || `<div class="empty-note">Nothing waiting for approval.</div>`;
   $("appr-dual").innerHTML = a.dual_control.map(x => `<div class="doc-row"><b>${esc(x.action)}</b> on <a href="#" onclick="openDoc(${x.document_id});return false">${esc(x.title)}</a>
+    ${x.detail ? `<div class="dfind-desc"><span class="muted">Replace:</span> "${esc(x.detail.old)}"<br><span class="muted">With:</span> "${esc(x.detail.new)}"</div>` : ""}
     <div class="muted">Requested by ${esc(x.requested_by)} · ${fdate(x.created_at)} · needs a second person</div>
     ${x.can_decide ? `<div class="action-row"><button class="btn-primary" style="margin:0" onclick="dualDecide(${x.id},true)">Approve</button><button class="btn-ghost" onclick="dualDecide(${x.id},false)">Reject</button></div>` : `<div class="muted">You made this request - another manager, admin or owner must decide.</div>`}</div>`).join("")
     || `<div class="empty-note">No pending dual-control requests.</div>`;

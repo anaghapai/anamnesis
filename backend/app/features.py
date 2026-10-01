@@ -25,7 +25,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text as sql_text
 from sqlalchemy.orm import Session
 
-from . import models, auth, retrieval, extract, help_bot
+from . import models, auth, retrieval, extract, help_bot, impact
 from .db import get_db
 
 router = APIRouter()
@@ -313,6 +313,146 @@ def decide_doc_access(req_id: int, req: DocAccessDecide, user: models.User = Dep
     return {"ok": True, "status": a.status}
 
 
+# ------------------------------------- cross-department request by description ---
+
+class DocFindIn(BaseModel):
+    department: str
+    description: str = Field(min_length=3, max_length=300)
+    reason: str = Field(default="", max_length=500)
+    days: int = 1
+
+
+class DocFindDecide(BaseModel):
+    approve: bool
+    document_ids: List[int] = []
+    days: Optional[int] = None
+
+
+def _can_decide_find(user, department: str) -> bool:
+    r = auth.rank(user)
+    return r >= ADMIN or (r >= MANAGER and user.department == department)
+
+
+def _words(text: str) -> set:
+    import re
+    return {w for w in re.findall(r"[a-z0-9]+", (text or "").lower()) if len(w) >= 3}
+
+
+def _find_candidates(db, approver, ar):
+    """Documents of the request's department that the approver manages and the requester
+    can't already open, best description match first. Only the approver ever sees this list."""
+    want = _words(ar.description)
+    requester = db.query(models.User).get(ar.requester_id)
+    rows = []
+    for d in db.query(models.Document).filter_by(org_id=ar.org_id, department=ar.department).all():
+        if d.deleted_at is not None or _ws(d) != "company" or not can_manage(approver, d):
+            continue
+        if requester and retrieval.user_can_see_document(requester, d, db):
+            continue
+        have = _words(d.title) | _words(d.tags) | _words((d.content or "")[:1500])
+        score = len(want & have) + 2 * len(want & _words(d.title))
+        rows.append({"id": d.id, "title": d.title, "visibility": d.visibility, "match": score})
+    rows.sort(key=lambda r: (-r["match"], r["title"].lower()))
+    return rows[:60]
+
+
+@router.post("/doc-requests")
+def request_doc_by_description(req: DocFindIn, user: models.User = Depends(auth.get_current_user),
+                               db: Session = Depends(get_db)):
+    if req.days not in (1, 7, 30):
+        raise HTTPException(400, "Choose 1, 7 or 30 days")
+    org = db.query(models.Organization).get(user.org_id)
+    depts = [x.strip() for x in (org.departments or "").split(",") if x.strip()]
+    if req.department not in depts:
+        raise HTTPException(400, "Choose a department")
+    if req.department == user.department:
+        raise HTTPException(400, "That's your own department. You can already open its documents.")
+    desc = req.description.strip()
+    if len(desc) < 3:
+        raise HTTPException(400, "Describe the document you need")
+    dup = db.query(models.DocFindRequest).filter_by(org_id=user.org_id, requester_id=user.id,
+                                                    department=req.department, description=desc,
+                                                    status="pending").first()
+    if not dup:
+        db.add(models.DocFindRequest(org_id=user.org_id, requester_id=user.id, department=req.department,
+                                     description=desc, reason=req.reason.strip(), days=req.days))
+        for a in _approvers(db, user.org_id, req.department, exclude_id=user.id):
+            _notify(db, user.org_id, user.id, a.id, "access_request",
+                    f"{user.name} needs a {req.department} document ({req.days}-day access): {desc[:120]}")
+        _log(db, user.org_id, user.id, "doc_access_find_requested", f"{req.department}, {req.days}d")
+        db.commit()
+    return {"ok": True, "message": "Request sent. The department's approver will pick the matching document."}
+
+
+@router.get("/doc-requests")
+def list_doc_find_requests(user: models.User = Depends(auth.get_current_user), db: Session = Depends(get_db)):
+    names = _names(db, user.org_id)
+    mine = db.query(models.DocFindRequest).filter_by(org_id=user.org_id, requester_id=user.id) \
+        .order_by(models.DocFindRequest.created_at.desc()).limit(30).all()
+    review = [a for a in db.query(models.DocFindRequest).filter_by(org_id=user.org_id, status="pending")
+              .order_by(models.DocFindRequest.created_at).all()
+              if a.requester_id != user.id and _can_decide_find(user, a.department)]
+
+    def out(a, is_mine):
+        item = {"id": a.id, "department": a.department, "description": a.description, "reason": a.reason,
+                "days": a.days, "status": a.status, "created_at": _iso(a.created_at),
+                "requester": names.get(a.requester_id)}
+        if is_mine and a.status == "approved":
+            ids = [int(x) for x in (a.granted_ids or "").split(",") if x.strip().isdigit()]
+            docs = [db.query(models.Document).get(i) for i in ids]
+            item["documents"] = [{"id": d.id, "title": d.title} for d in docs if d and d.deleted_at is None]
+        return item
+    return {"mine": [out(a, True) for a in mine], "for_review": [out(a, False) for a in review]}
+
+
+@router.get("/doc-requests/{req_id}/candidates")
+def doc_find_candidates(req_id: int, user: models.User = Depends(auth.get_current_user), db: Session = Depends(get_db)):
+    a = db.query(models.DocFindRequest).get(req_id)
+    if not a or a.org_id != user.org_id or a.requester_id == user.id or not _can_decide_find(user, a.department):
+        raise HTTPException(404, "No such request")
+    return {"documents": _find_candidates(db, user, a)}
+
+
+@router.post("/doc-requests/{req_id}/decide")
+def decide_doc_find(req_id: int, req: DocFindDecide, user: models.User = Depends(auth.get_current_user),
+                    db: Session = Depends(get_db)):
+    a = db.query(models.DocFindRequest).get(req_id)
+    if not a or a.org_id != user.org_id or not _can_decide_find(user, a.department):
+        raise HTTPException(404, "No such request")
+    if a.requester_id == user.id:
+        raise HTTPException(403, "You can't approve your own request")
+    if a.status != "pending":
+        raise HTTPException(400, "Already decided")
+    days = req.days if req.days in (1, 7, 30) else a.days
+    picked = []
+    if req.approve:
+        ids = list(dict.fromkeys(req.document_ids))
+        if not ids:
+            raise HTTPException(400, "Pick the document to give access to")
+        for i in ids:
+            d = db.query(models.Document).get(i)
+            if (not d or d.org_id != user.org_id or d.deleted_at is not None or _ws(d) != "company"
+                    or d.department != a.department or not can_manage(user, d)):
+                raise HTTPException(400, "One of the chosen documents isn't available for this request")
+            picked.append(d)
+    a.status = "approved" if req.approve else "denied"
+    a.decided_by, a.decided_at = user.id, _now()
+    if picked:
+        a.granted_ids = ",".join(str(d.id) for d in picked)
+        for d in picked:
+            db.add(models.DocumentGrant(org_id=user.org_id, document_id=d.id, user_id=a.requester_id,
+                                        granted_by=user.id, source="request",
+                                        expires_at=_now() + datetime.timedelta(days=days)))
+    _notify(db, user.org_id, user.id, a.requester_id, "access_decision",
+            (f"Your request was approved for {days} day(s): " + ", ".join(f"'{d.title}'" for d in picked))
+            if picked else f"Your request for a {a.department} document ('{a.description[:80]}') was denied",
+            document_id=picked[0].id if picked else None)
+    _log(db, user.org_id, user.id, "doc_access_find_" + a.status,
+         f"request #{a.id} for user #{a.requester_id}" + (f", docs {a.granted_ids}" if picked else ""))
+    db.commit()
+    return {"ok": True, "status": a.status}
+
+
 @router.get("/documents/{doc_id}/access")
 def who_has_access(doc_id: int, user: models.User = Depends(auth.get_current_user), db: Session = Depends(get_db)):
     d = _visible_doc(db, user, doc_id)
@@ -407,7 +547,7 @@ class DualDecide(BaseModel):
     note: Optional[str] = None
 
 
-def _apply_dual(db, dc: models.DualControl, d: models.Document):
+def _apply_dual(db, dc: models.DualControl, d: models.Document, actor=None):
     p = json.loads(dc.payload or "{}")
     if dc.action == "classify":
         d.visibility = p["visibility"]
@@ -416,6 +556,13 @@ def _apply_dual(db, dc: models.DualControl, d: models.Document):
     elif dc.action == "permanent_access":
         ids = set(_allowed_ids(d)) | {int(p["user_id"])}
         d.allowed_user_ids = ",".join(str(i) for i in sorted(ids))
+    elif dc.action == "content_edit":
+        old, new = p["old_text"], p["new_text"]
+        if (d.content or "").count(old) != 1:
+            raise HTTPException(409, "The document changed since this was proposed, so the wording can't be applied. "
+                                     "Reject it and ask for a new correction.")
+        impact.apply_content_edit(db, actor, d, d.content.replace(old, new, 1),
+                                  f"Corrected after review of: {p.get('question', '')[:120]}")
 
 
 @router.post("/documents/{doc_id}/classify")
@@ -480,10 +627,15 @@ def list_dual(user: models.User = Depends(auth.require_role("manager")), db: Ses
         d = db.query(models.Document).get(dc.document_id)
         p = json.loads(dc.payload or "{}")
         what = (f"Change classification to {p.get('visibility')}" if dc.action == "classify"
+                else "Correct the wording in this document" if dc.action == "content_edit"
                 else f"Give {p.get('name', 'user #' + str(p.get('user_id')))} permanent access")
+        detail = {"old": p.get("old_text"), "new": p.get("new_text")} if dc.action == "content_edit" else None
+        can_dec = dc.status == "pending" and dc.requested_by != user.id
+        if dc.action == "content_edit" and d is not None:
+            can_dec = can_dec and impact._is_doc_owner(user, d)
         out.append({"id": dc.id, "document_id": dc.document_id, "title": d.title if d else "(deleted)",
                     "action": what, "requested_by": names.get(dc.requested_by), "status": dc.status,
-                    "can_decide": dc.status == "pending" and dc.requested_by != user.id,
+                    "can_decide": can_dec, "detail": detail,
                     "created_at": _iso(dc.created_at), "decided_by": names.get(dc.decided_by), "note": dc.note})
     return out
 
@@ -501,10 +653,12 @@ def decide_dual(dc_id: int, req: DualDecide, user: models.User = Depends(auth.re
     d = db.query(models.Document).get(dc.document_id)
     if not d:
         raise HTTPException(404, "Document no longer exists")
+    if dc.action == "content_edit" and not impact._is_doc_owner(user, d):
+        raise HTTPException(403, "Only the document's owner or an admin can approve a change to its text")
     dc.status = "approved" if req.approve else "rejected"
     dc.decided_by, dc.decided_at, dc.note = user.id, _now(), req.note
     if req.approve:
-        _apply_dual(db, dc, d)
+        _apply_dual(db, dc, d, user)
     _notify(db, user.org_id, user.id, dc.requested_by, "review_result",
             f"Your request on '{d.title}' was {dc.status} by {user.name}", document_id=d.id)
     _log(db, user.org_id, user.id, f"dual_control_{dc.status}", f"{dc.action} on '{d.title}'")
@@ -520,6 +674,7 @@ def revoke_extra_access(db: Session, emp: models.User, actor_id=None, reason="")
     n_dept = db.query(models.DepartmentGrant).filter_by(user_id=emp.id).delete()
     n_doc = db.query(models.DocumentGrant).filter_by(user_id=emp.id).delete()
     db.query(models.DocAccessRequest).filter_by(requester_id=emp.id, status="pending").update({"status": "denied"})
+    db.query(models.DocFindRequest).filter_by(requester_id=emp.id, status="pending").update({"status": "denied"})
     db.query(models.AccessRequest).filter_by(requester_id=emp.id, status="pending").update({"status": "denied"})
     n_named = 0
     for d in db.query(models.Document).filter_by(org_id=emp.org_id, visibility="restricted"):

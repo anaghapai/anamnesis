@@ -12,10 +12,10 @@ import difflib
 # (view to open, question keywords, answer)
 FAQ = [
     ("documents", "request access ask permission cannot open locked document no access",
-     "If you can't open a document, use **Request access**: Documents -> *Request access to a document*, enter the "
-     "document number (from the link a colleague shared), a reason and a duration (1, 7 or 30 days). "
-     "The document owner or department manager approves or rejects it, and the access expires by itself. "
-     "For a whole department use *Cross-department access* on the same page."),
+     "If you can't open a document, use **Cross-department access** on the Documents page: choose the department, "
+     "describe the document in your own words, and pick 1, 7 or 30 days. The department's approver picks the matching "
+     "document and approves or rejects it, and the access expires by itself. If a colleague shared a link or document "
+     "number, opening that link shows a short request form for that exact document."),
     ("documents", "restricted meaning classification public internal confidential levels",
      "Every document has a classification. **Public** - anyone the department rule allows. **Internal** - any member. "
      "**Confidential** - managers and above. **Restricted** - only people who are named on the document (plus the org owner). "
