@@ -162,11 +162,17 @@
   async function versions(id) {
     const r = await A(`/documents/${id}/versions`);
     const ov = modal("Version history", r.versions.slice().reverse().map(v => `<div class="bn-expert"><b>v${v.version}</b>${v.current ? " (current)" : ""}
-      <span class="muted">${E(v.by)} · ${D(v.at)} · ${E(v.note)}</span>${v.version > 1 ? ` <a href="#" data-v="${v.version}">what changed?</a>` : ""}</div>`).join("") + `<div id="bn-cmp"></div>`, []);
+      <span class="muted">${E(v.by)} · ${D(v.at)} · ${E(v.note)}</span>${v.version > 1 ? ` <a href="#" data-v="${v.version}">what changed?</a>` : ""}${v.current ? "" : ` <a href="#" data-rb="${v.version}">restore this version</a>`}</div>`).join("") + `<div id="bn-cmp"></div>`, []);
     ov.querySelectorAll("[data-v]").forEach(a => a.onclick = async e => {
       e.preventDefault(); const v = Number(a.dataset.v);
       const c = await A(`/documents/${id}/compare?a=${v - 1}&b=${v}`);
       ov.querySelector("#bn-cmp").innerHTML = `<h4 class="bn-h">v${v - 1} → v${v}</h4>` + ((c.changes || []).map(x => `<div class="bn-diff"><del>${E(x.old)}</del><ins>${E(x.new)}</ins></div>`).join("") || "<div class='muted'>No sentence-level changes.</div>");
+    });
+    ov.querySelectorAll("[data-rb]").forEach(a => a.onclick = async e => {
+      e.preventDefault(); const v = Number(a.dataset.rb);
+      if (!confirm(`Restore v${v}? This creates a NEW version with the text of v${v}. Older versions are kept.`)) return;
+      try { await A(`/documents/${id}/rollback`, POST({ version: v })); ov.remove(); versions(id); }
+      catch (err) { ov.querySelector('[data-role="err"]').textContent = err.message; }
     });
   }
 

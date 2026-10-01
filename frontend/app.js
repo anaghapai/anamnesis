@@ -392,7 +392,7 @@ async function loadDocuments() {
         <button class="btn-ghost" onclick="summarizeDoc(${d.id})">📝 Summarize</button>
         <button class="btn-ghost" onclick="askAboutDoc(${d.id})">💬 Ask about this</button>
         <button class="btn-ghost" onclick="verifyDoc(${d.id})">✅ Mark reviewed</button>
-        <button class="btn-ghost" onclick="requestDocUpdate(${d.id})">✋ Request update</button>
+        ${d.owner_id != null && ME && d.owner_id === ME.id ? "" : `<button class="btn-ghost" onclick="requestDocUpdate(${d.id})">✋ Request update</button>`}
         ${ACTIVE_FOLDER !== null && (FOLDERS.find(f => f.id === ACTIVE_FOLDER) || {}).can_edit ? `<button class="btn-ghost" onclick="removeFromFolder(${ACTIVE_FOLDER},${d.id})">↩ Remove from folder</button>` : folderPicker(d.id)}
       </div><div class="doc-summary hidden" id="doc-summary-${d.id}"></div></div>`;
   }).join("") : `<div class='empty-note'>${ACTIVE_FOLDER !== null ? "This folder is empty (or holds documents you can't open). Use “Add to folder” on any document." : "No documents yet."}</div>`;
@@ -464,7 +464,7 @@ async function openDoc(id, hl) {
         <button class="btn-primary" style="margin:0" onclick="askAboutDoc(${d.id})">💬 Ask about this document</button>
         <button class="btn-secondary" onclick="summarizeDoc(${d.id}, 'viewer-summary')">📝 Summarize</button>
         <button class="btn-ghost" onclick="verifyDoc(${d.id})">✅ Mark reviewed</button>
-        <button class="btn-ghost" onclick="requestDocUpdate(${d.id})">✋ Request update</button>
+        ${d.owner_id != null && ME && d.owner_id === ME.id ? "" : `<button class="btn-ghost" onclick="requestDocUpdate(${d.id})">✋ Request update</button>`}
         ${folderPicker(d.id, d.folders.map(f => f.id))}
       </div>
       ${d.folders.length ? `<div class="folder-tags">In: ${d.folders.map(f => `<span class="folder-tag">${f.scope === "personal" ? "🔒" : "📁"} ${esc(f.name)}${f.can_edit ? ` <a href="#" title="Remove from folder" onclick="removeFromFolder(${f.id},${d.id});return false">✕</a>` : ""}</span>`).join(" ")}</div>` : ""}

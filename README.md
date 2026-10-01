@@ -93,7 +93,7 @@ Everything below is plain rules and arithmetic (no generative model), and every 
 6. `asha` -> **People -> Add employee** -> generated credentials -> log in as that person -> forced password change.
 
 ## Not included (on purpose)
-OCR for scanned files, generative LLM answers, real Google OAuth, 2FA, emailing credentials, hash-chained audit log.
+OCR for scanned files, generative LLM answers, real Google OAuth, 2FA, emailing credentials.
 
 ## Layout
 `backend/app/`: `main.py` routes, `models.py`, `auth.py`, `retrieval.py` (permission-aware TF-IDF), `graph.py`
@@ -113,3 +113,11 @@ OCR for scanned files, generative LLM answers, real Google OAuth, 2FA, emailing 
 - **Optional local model** (`app/llm.py`): if Ollama is running (`ollama pull qwen2.5:3b`), *Explain (local model)* rewrites the already-authorized
   evidence; it is closed-book, abstains when evidence is missing, and removes claims the evidence does not support. Nothing leaves the machine.
 - Upgrading an existing `anamnesis.db` is automatic on first start (new tables + columns are created).
+
+## Polish pack (new)
+
+- **Theme v2 + landing page**: `frontend/theme-v2.css` and `landing-v2.js` (green theme, public landing page, emoji-free labels).
+- **Tamper-evident audit log**: each row stores a SHA-256 hash chained to the previous row (`app/auditchain.py`). **Audit Log -> Verify integrity** reports the first edited or missing row. Rows from before this feature are listed as unprotected. Someone with full database access could still rebuild the whole chain, and deleting only the newest rows is not detectable unless you noted the head hash earlier.
+- **Audit CSV export** of the current filters (formula-injection safe, includes each row's hash).
+- **Notification bell**, toasts and a loading bar, mobile menu, keyboard shortcuts (`/`, `g` then `d a s w`, `?`), basic accessibility labels, **My Questions**, local-model status line, and **Share access directly** on People. All in `frontend/polish.js` and `polish.css`.
+- **Timezone-correct dates** on Search (same fix as the Audit Log).

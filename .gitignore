@@ -1,9 +1,10 @@
-﻿venv/
+venv/
 __pycache__/
 *.py[cod]
 *.db
 *.sqlite3
 .env
+.pytest_cache/
 .DS_Store
 Thumbs.db
 *.log

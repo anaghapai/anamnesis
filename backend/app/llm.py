@@ -34,6 +34,10 @@ ABSTAIN = ("Anamnesis does not have authorized evidence to establish that. "
            "No evidence means no organizational answer.")
 
 
+INSUFFICIENT = ("Related authorized evidence was found, but it is not enough to answer this reliably. "
+                "Review the evidence below or ask the organization.")
+
+
 def _http(path, payload=None, timeout=5):
     req = urllib.request.Request(HOST + path, data=json.dumps(payload).encode() if payload is not None else None,
                                  headers={"Content-Type": "application/json"})
@@ -67,6 +71,10 @@ def status():
 
 # ----------------------------------------------------------- claim checker ---
 
+_META_WORDS = ("evidence reasoning conflict conflicting support supports supported state states stated say says said "
+              "confirm confirms confirmed consistent consistently point points agree agrees disagree disagrees "
+              "mention mentions mentioned indicate indicates show shows both different answer question source sources")
+META_STEMS = {nlp.stem(w) for w in _META_WORDS.split()}
 _NUM = re.compile(r"\d+(?:[.,:/-]\d+)*")
 _CITE = re.compile(r"\s*\[E\d+(?:\s*,\s*E\d+)*\]")
 
@@ -79,10 +87,11 @@ def _sentences(text: str) -> List[str]:
 def _support(sentence: str, ev_text: str, ev_stems: set) -> float:
     """0..1 - share of the sentence's content words found in the evidence; 0 when a number isn't there."""
     plain = _CITE.sub("", sentence)
+    plain = re.sub(r"\bE\d+\b", "", plain)
     for num in _NUM.findall(plain):
         if num not in ev_text:
             return 0.0
-    stems = {s for s in nlp.analyze(plain)[1] if len(s) > 2}
+    stems = {s for s in nlp.analyze(plain)[1] if len(s) > 2 and s not in META_STEMS}
     if not stems:
         return 1.0
     return len(stems & ev_stems) / len(stems)
@@ -132,7 +141,10 @@ def gather_evidence(db: Session, user, qa: models.QARecord):
 SYSTEM = ("You are the reasoning engine inside a private organizational knowledge system. "
           "Answer ONLY from the numbered EVIDENCE. Never use outside knowledge. Never guess. "
           "If the evidence does not establish the answer, reply exactly: INSUFFICIENT_EVIDENCE. "
-          "Otherwise answer in at most 3 short sentences and cite evidence like [E1].")
+          "Otherwise write: the direct answer in 1-2 sentences; then a line starting 'Reasoning:' with 2-4 short "
+          "sentences explaining which evidence supports the answer and how; then, ONLY if evidence items disagree "
+          "(different dates, numbers or owners), a line starting 'Conflict:' naming both sides with their citations. "
+          "Cite every sentence like [E1]. Do not add any fact that is not in the evidence.")
 
 
 @router.get("/llm/status")
@@ -147,29 +159,32 @@ def explain(qa_id: int, user: models.User = Depends(auth.get_current_user), db: 
         raise HTTPException(404, "Question not found")
     evidence = gather_evidence(db, user, qa)
     if not evidence:                                            # closed-book: the model is never called
-        return {"answer": None, "abstained": True, "message": ABSTAIN, "evidence": [], "model": None}
+        return {"answer": None, "abstained": True, "status": "no_evidence", "message": ABSTAIN, "evidence": [], "model": None}
     st = status()
     if not st["available"]:
         raise HTTPException(503, st["hint"] or "Local model unavailable")
     block = "\n".join(f"[E{i + 1}] ({e['label']}) {e['text']}" for i, e in enumerate(evidence))
     try:
-        res = _http("/api/chat", {"model": st["model"], "stream": False,
-                                  "options": {"temperature": 0, "num_predict": 300},
+        res = _http("/api/chat", {"model": st["model"], "stream": False, "think": False,
+                                  "options": {"temperature": 0, "num_predict": int(os.environ.get("ANAMNESIS_MAX_TOKENS", "2000"))},
                                   "messages": [{"role": "system", "content": SYSTEM},
-                                               {"role": "user", "content": f"EVIDENCE:\n{block}\n\nQUESTION: {qa.question}"}]},
-                    timeout=180)
+                                               {"role": "user", "content": f"EVIDENCE:\n{block}\n\nQUESTION: {qa.question}\n\n/no_think"}]},
+                    timeout=300)
         raw = ((res.get("message") or {}).get("content") or "").strip()
+        raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.S).strip()
     except Exception as e:
         raise HTTPException(502, f"Local model call failed: {e}")
+    if res.get("done_reason") == "length":
+        raise HTTPException(502, "Local model ran out of tokens before answering. Try again.")
     db.add(models.AuditLog(org_id=user.org_id, user_id=user.id, action="ai_explain",
                            detail=f"qa #{qa.id} model={st['model']}"))
     db.commit()
     shown = [{"id": f"E{i + 1}", "label": e["label"], "text": e["text"]} for i, e in enumerate(evidence)]
-    if not raw or "INSUFFICIENT_EVIDENCE" in raw:
-        return {"answer": None, "abstained": True, "message": ABSTAIN, "evidence": shown, "model": st["model"]}
+    if not raw or raw.strip().strip(".").strip().upper() == "INSUFFICIENT_EVIDENCE":
+        return {"answer": None, "abstained": True, "status": "insufficient", "message": INSUFFICIENT, "evidence": shown, "model": st["model"]}
     kept, removed = check_claims(raw, [e["text"] for e in evidence])
     if not kept:
-        return {"answer": None, "abstained": True, "message": ABSTAIN, "removed": removed, "evidence": shown,
+        return {"answer": None, "abstained": True, "status": "insufficient", "message": INSUFFICIENT, "removed": removed, "evidence": shown,
                 "model": st["model"]}
     return {"answer": " ".join(kept), "abstained": False, "removed": removed, "checked": len(kept) + len(removed),
             "evidence": shown, "model": st["model"]}

@@ -201,6 +201,8 @@ class AuditLog(Base):
     action = Column(String, nullable=False)
     detail = Column(Text, nullable=True)
     created_at = Column(DateTime, default=now)
+    prev_hash = Column(String, nullable=True)     # tamper-evident chain, see app/auditchain.py
+    row_hash = Column(String, nullable=True)
 
 
 class DepartmentGrant(Base):

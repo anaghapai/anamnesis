@@ -518,6 +518,45 @@ def compare(doc_id: int, a: int = Query(...), b: int = Query(...), user: models.
     return {"a": a, "b": b, "changes": diff_changes(text_of(a), text_of(b))}
 
 
+@router.get("/documents/{doc_id}/versions/{version}")
+def version_text(doc_id: int, version: int, user: models.User = Depends(auth.get_current_user),
+                 db: Session = Depends(get_db)):
+    d = _doc_for(db, user, doc_id)
+    rows = {r.version: r for r in _version_rows(db, d.id)}
+    if version in rows:
+        r = rows[version]
+        return {"version": version, "title": r.title, "content": r.content, "note": r.note, "at": _iso(r.created_at)}
+    if not rows and version == 1:
+        return {"version": 1, "title": d.title, "content": d.content, "note": "Original text", "at": _iso(d.created_at)}
+    raise HTTPException(404, f"Version {version} not found")
+
+
+class RollbackIn(BaseModel):
+    version: int
+    note: Optional[str] = None
+    preview: bool = False
+
+
+@router.post("/documents/{doc_id}/rollback")
+def rollback(doc_id: int, req: RollbackIn, user: models.User = Depends(auth.get_current_user),
+             db: Session = Depends(get_db)):
+    """Rollback never deletes history: it creates a NEW version whose text equals the chosen old version."""
+    d = _doc_for(db, user, doc_id)
+    if not can_edit(user, d):
+        raise HTTPException(403, "Only the owner, the department's managers or admins can change this document")
+    rows = {r.version: r for r in _version_rows(db, d.id)}
+    if req.version not in rows:
+        raise HTTPException(404, f"Version {req.version} not found")
+    if req.version == _current_version(db, d.id):
+        raise HTTPException(400, "That is already the current version")
+    note = (req.note or "").strip() or f"Rollback to v{req.version}"
+    res = edit_content(doc_id, ContentIn(content=rows[req.version].content, preview=req.preview, note=note), user, db)
+    if res.get("applied"):
+        _log(db, user.org_id, user.id, "document_rollback", f"'{d.title}' restored v{req.version} as v{res['version']}")
+        db.commit()
+    return res
+
+
 def _cited_answers(db: Session, org_id: int, doc_id: int):
     rows = db.query(models.QARecord).filter(
         models.QARecord.org_id == org_id, models.QARecord.answer_text.isnot(None),

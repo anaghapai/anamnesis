@@ -320,3 +320,10 @@ mark { background: rgba(251,191,36,.28); color: var(--text); border-radius: 3px;
   .chat-side { width: 100%; max-height: 150px; }
   .chat-thread { max-height: 60vh; }
 }
+
+/* Sidebar stays one screen tall: the menu scrolls, Log out is always visible at the bottom. */
+.sidebar { position: sticky; top: 0; height: 100vh; overflow: hidden; align-self: flex-start; }
+.sidebar nav { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding-right: 2px; }
+.sidebar nav::-webkit-scrollbar { width: 6px; }
+.sidebar nav::-webkit-scrollbar-thumb { background: var(--border); border-radius: 6px; }
+.sidebar .btn-logout { flex-shrink: 0; margin-top: 8px; }

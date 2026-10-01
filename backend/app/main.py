@@ -11,13 +11,14 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
-from . import models, schemas, auth, retrieval, graph, extract, features, insights, impact, knowledge, llm
+from . import models, schemas, auth, retrieval, graph, extract, features, insights, impact, knowledge, llm, orgsearch, auditview, auditchain
 from .db import engine, get_db, SessionLocal
 
 models.Base.metadata.create_all(bind=engine)
 features.ensure_schema(engine)      # adds any missing column to an older anamnesis.db automatically
 insights.ensure_schema(engine)
 impact.ensure_schema(engine)        # knowledge-impact columns on qa_records
+auditchain.ensure_schema(engine)    # audit hash-chain columns
 
 CHUNK_VERSION = "3"
 
@@ -179,13 +180,46 @@ def signup(req: schemas.SignupRequest, db: Session = Depends(get_db)):
     return schemas.TokenResponse(access_token=auth.create_access_token(user.id))
 
 
+# --- login brute-force protection (prototype: in-memory, resets on server restart) ---
+import time as _time
+_LOGIN_FAILS = {}
+_FAIL_LIMIT, _FAIL_WINDOW, _LOCK_BASE, _LOCK_MAX = 5, 900, 60, 900
+
+
+def _login_locked(ident):
+    st = _LOGIN_FAILS.get(ident)
+    return max(0, int(st["until"] - _time.time())) if st else 0
+
+
+def _login_failed(ident):
+    now = _time.time()
+    st = _LOGIN_FAILS.get(ident)
+    if not st or now - st["last"] > _FAIL_WINDOW:
+        st = {"n": 0, "until": 0, "last": now}
+    st["n"] += 1
+    st["last"] = now
+    if st["n"] >= _FAIL_LIMIT:
+        st["until"] = now + min(_LOCK_MAX, _LOCK_BASE * 2 ** (st["n"] - _FAIL_LIMIT))
+    _LOGIN_FAILS[ident] = st
+    return st
+
+
 @app.post("/auth/login", response_model=schemas.TokenResponse)
 def login(req: schemas.LoginRequest, db: Session = Depends(get_db)):
     ident = req.identifier.strip().lower()
     user = db.query(models.User).filter(
         (models.User.email == ident) | (models.User.username == ident)).first()
+    wait = _login_locked(ident)
+    if wait:
+        if user:
+            log(db, user.org_id, user.id, "login_blocked", f"too many failed attempts, locked {wait}s more")
+        raise HTTPException(429, f"Too many failed attempts. Try again in {wait} seconds.", headers={"Retry-After": str(wait)})
     if not user or not user.active or not auth.verify_password(req.password, user.password_hash):
+        st = _login_failed(ident)
+        if user:
+            log(db, user.org_id, user.id, "login_failed", f"failed attempt {st['n']}")
         raise HTTPException(401, "Incorrect username/email or password")
+    _LOGIN_FAILS.pop(ident, None)
     if user.pending_approval:
         raise HTTPException(403, "Your account is waiting on approval from an admin or owner")
     log(db, user.org_id, user.id, "login")
@@ -590,7 +624,7 @@ def get_document(doc_id: int, user: models.User = Depends(auth.get_current_user)
     member_of = {i.folder_id for i in db.query(models.FolderItem).filter_by(document_id=d.id)}
     return {"id": d.id, "title": d.title, "content": d.content, "visibility": d.visibility,
             "department": d.department, "file_type": d.file_type, "filename": d.filename,
-            "owner": names.get(d.owner_id), "uploaded_by": names.get(d.uploaded_by),
+            "owner_id": d.owner_id, "owner": names.get(d.owner_id), "uploaded_by": names.get(d.uploaded_by),
             "last_reviewed_by": names.get(d.last_reviewed_by), "needs_review": needs_review,
             "review_state": ri["review_state"], "review_reasons": ri["review_reasons"], "review_severity": ri["review_severity"],
             "verified_until": d.verified_until.isoformat() if d.verified_until else None,
@@ -637,6 +671,8 @@ def request_doc_update(doc_id: int, req: schemas.RequestUpdate, user: models.Use
     if not d or d.org_id != user.org_id or not retrieval.user_can_see_document(user, d, db):
         raise HTTPException(404, "Document not found")
     owner = db.query(models.User).get(d.owner_id) if d.owner_id else None
+    if owner and owner.id == user.id:
+        raise HTTPException(400, "You own this document, so there is nobody to ask. Use Edit text to update it yourself.")
     title = f"Update '{d.title}'" + (f" — {req.note.strip()}" if req.note.strip() else "")
     task = models.Task(org_id=user.org_id, title=title, owner=owner.name if owner else None,
                        assignee_id=owner.id if owner else None, created_by=user.id, is_personal=False)
@@ -1264,6 +1300,9 @@ app.include_router(insights.router)
 app.include_router(impact.router)       # Knowledge Impact + versions + revalidation
 app.include_router(knowledge.router)    # Ask the Organization + related questions + Starting Point
 app.include_router(llm.router)          # optional local model (Ollama), closed-book
+app.include_router(orgsearch.router)   # permission-aware search + filters
+app.include_router(auditview.router)   # audit log: categories, filters, detail
+app.include_router(auditchain.router)   # audit log: tamper-evident chain check + CSV export
 
 
 # ------------------------------------------------------- static files -----

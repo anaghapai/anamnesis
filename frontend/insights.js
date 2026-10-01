@@ -78,7 +78,7 @@
     if (prevViewer) await prevViewer(d);
     try { META = await A("/insights/review-meta"); } catch { return; }
     const m = META[d.id]; if (!m) return;
-    const tools = reviewButtons(d.id, m) + (m.can_assign ? ` <button class="btn-ghost" data-ia="replace" data-id="${d.id}">✏️ Replace text</button>` : "");
+    const tools = reviewButtons(d.id, m);
     const box = document.createElement("div");
     box.className = "ia-panel";
     box.innerHTML = whyHtml(m) + `<div class="action-row" style="margin:6px 0 0">${tools}</div>`;
