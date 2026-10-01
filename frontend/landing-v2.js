@@ -19,7 +19,8 @@
       <h2 class="lp-h1">From scattered documents to trusted answers, <span class="lp-grad">with memory and proof</span></h2>
       <div class="lp-cta">
         <div class="lp-cta-row"><button class="lp-btn lp-solid" data-go="login">Sign in to your workspace</button>
-          <button class="lp-btn lp-outline" data-scroll="lp-how">See how it works</button></div>
+          <button class="lp-btn lp-outline" data-scroll="lp-how">See how it works</button>
+          <button class="lp-btn lp-outline" data-legal="accounts">Sample accounts</button></div>
         <span class="lp-note">Cited, permission-checked, human-verified</span>
       </div>
     </div>
@@ -82,7 +83,7 @@
       <div><div class="brand" style="margin:0 0 10px"><span class="brand-dot"></span><h1>Anamnesis</h1></div>
         <p>A private organizational brain with memory, permission and provenance.</p></div>
       <div><a href="#lp-features">Features</a><a href="#lp-how">How it works</a><a href="#lp-access">Access model</a></div>
-      <div><button class="lp-link" data-legal="privacy">Privacy</button><button class="lp-link" data-legal="terms">Terms</button></div>
+      <div><button class="lp-link" data-legal="privacy">Privacy</button><button class="lp-link" data-legal="terms">Terms</button><button class="lp-link" data-legal="accounts">Sample accounts</button></div>
     </div>
     <div class="lp-copy">Anamnesis, a team project</div>
   </footer>
@@ -90,6 +91,10 @@
 <dialog class="lp-dlg" id="lp-dlg"><div id="lp-dlg-body"></div><button class="lp-btn lp-outline" id="lp-dlg-x" style="margin-top:12px">Close</button></dialog>`;
 
   const LEGAL = {
+    accounts: `<h3>Sample accounts</h3>
+      <p>A sample organization, Cipher Labs, is loaded. Every account uses the password <b>demo1234</b>.</p>
+      <p><b>asha</b>, Owner, Management<br><b>rahul</b>, Manager, Engineering<br><b>meera</b>, Manager, IT<br><b>priya</b>, Intern, IT<br><b>kabir</b>, Member, HR</p>
+      <p>Each person only sees what their role and department allow, so sign in as different people to compare.</p>`,
     privacy: `<h3>Privacy</h3>
       <p>Documents, questions and account details are stored in the database of the server that runs Anamnesis. Passwords are stored hashed.</p>
       <p>Your sign-in token stays in your browser until you log out. Managers and above can read the audit log of logins, questions, uploads and reviews.</p>

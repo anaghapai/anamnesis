@@ -259,7 +259,7 @@
     query: DEFAULT_Q,
     plain: { total: 2, rows: [{ label: "Documents", count: 1 }, { label: "Passages", count: 1 }, { label: "Facts", count: 0 }],
       missing: ["No context", "No relationships", "No proof"],
-      note: "Illustration. Counted from the freshly seeded demo database; in the app the numbers are counted from your own documents." },
+      note: "Illustration. In the app these numbers are counted from your own documents." },
     anamnesis: {
       answer: "The VPN password rotates every 90 days.", question: DEFAULT_Q,
       state: { code: "verified", label: "Verified by a person" },

@@ -1,1 +1,47 @@
-{}
+{
+ "expense": [
+  "reimbursed",
+  "reimbursing",
+  "reimbursable",
+  "refund",
+  "refunded",
+  "claimed",
+  "claiming"
+ ],
+ "leave": [
+  "maternity",
+  "paternity",
+  "parental",
+  "sabbatical",
+  "bereavement",
+  "day offs",
+  "leaves"
+ ],
+ "onboarding": [
+  "new hire",
+  "new joiner",
+  "new joinee",
+  "joining",
+  "first week",
+  "induction",
+  "orientation",
+  "getting started"
+ ],
+ "salary": [
+  "payroll",
+  "paycheck",
+  "payslip",
+  "pay slip",
+  "ctc",
+  "wage",
+  "wages"
+ ],
+ "hire": [
+  "recruit",
+  "recruiting",
+  "recruitment",
+  "candidate",
+  "candidates",
+  "interview"
+ ]
+}

@@ -183,8 +183,10 @@ function answerHtml(m) {
     h += `<div class="verified-block"><h4 style="margin:0 0 6px">✅ ${v.kind === "corrected" ? "Corrected" : "Verified"} answer</h4>
       ${esc(v.answer)}<div class="by">Reviewed by ${esc(v.reviewer || "a supervisor")}${v.note ? " — " + esc(v.note) : ""}</div></div>`;
   }
+  const norm = t => (t || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const same = m.verified && m.answer && norm(m.verified.answer) === norm(m.answer.text);
   if (m.answer) {
-    h += `<div class="answer-main">${esc(m.answer.text)}</div>
+    h += `${same ? "" : `<div class="answer-main">${esc(m.answer.text)}</div>`}
       <div class="answer-src">From <a href="#" onclick="openDocFromMsg(${m.qa_id},${m.answer.document_id});return false">${esc(m.answer.document_title)}</a>
       · <a href="#" onclick="openDocFromMsg(${m.qa_id},${m.answer.document_id});return false">open full document ↗</a></div>`;
   } else if (!m.verified && !m.multi_hop) {
@@ -538,7 +540,7 @@ async function loadReviews() {
       <div class="passage"><strong>Answer given:</strong> ${esc(r.answer || "(no answer)")}
         ${r.sources.filter(s => s.document_title).map(s => `<div class="passage-src">source: ${esc(s.document_title)}</div>`).join("")}</div>
       ${r.flag_note ? `<div class="muted">🚩 ${esc(r.asker)} says: ${esc(r.flag_note)}</div>` : ""}
-      <textarea rows="2" id="rev-ans-${r.id}" placeholder="Write the correct answer (needed for 'Correct')…"></textarea>
+      <textarea rows="2" id="rev-ans-${r.id}" oninput="revSync(${r.id})" placeholder="Write the correct answer (needed for 'Correct')…"></textarea>
       <div class="row-gap" style="margin-top:8px">
         <input type="text" id="rev-s-${r.id}" placeholder="Optional graph fact: subject">
         <input type="text" id="rev-r-${r.id}" placeholder="relation">
@@ -552,6 +554,7 @@ async function loadReviews() {
         <button class="btn-ghost" onclick="review(${r.id},'reject')">❌ Mark wrong</button>
       </div><div class="auth-error" id="rev-msg-${r.id}"></div></div>`).join("")
     : "<div class='empty-note'>Nothing waiting for review. 🎉</div>";
+  Object.keys(REV_DOCS).forEach(k => { if ($("rev-doc-sel-" + k)) revDocFill(Number(k)); });
 }
 const REV_DOCS = {};   // review id -> cited passages (document_id, title, text)
 function revDocBlock(r) {
@@ -563,16 +566,20 @@ function revDocBlock(r) {
   REV_DOCS[r.id] = opts;
   if (!opts.length) return "";
   return `<div class="rev-doc">
-    <label class="dfind-opt"><input type="checkbox" id="rev-doc-on-${r.id}" onchange="revDocToggle(${r.id})">
+    <label class="dfind-opt"><input type="checkbox" id="rev-doc-on-${r.id}" onchange="revDocToggle(${r.id})" checked>
       <span><b>Also correct the source document</b> (saved as a new version, old versions are kept)</span></label>
-    <div id="rev-doc-box-${r.id}" class="hidden">
+    <div id="rev-doc-box-${r.id}">
       <select id="rev-doc-sel-${r.id}" onchange="revDocFill(${r.id})">${opts.map(o => `<option value="${o.document_id}">${esc(o.document_title)}</option>`).join("")}</select>
-      <label class="muted" for="rev-doc-old-${r.id}">Wording in the document to replace (edit it to the exact part)</label>
+      <label class="muted" for="rev-doc-old-${r.id}">This wording in the document will be replaced. Edit it to the exact part, and keep any details you still need in the new wording.</label>
       <textarea rows="2" id="rev-doc-old-${r.id}"></textarea>
       <label class="muted" for="rev-doc-new-${r.id}">New wording</label>
-      <textarea rows="2" id="rev-doc-new-${r.id}" placeholder="e.g. The VPN password rotates every 45 days."></textarea>
+      <textarea rows="2" id="rev-doc-new-${r.id}" oninput="this.dataset.touched='1'" placeholder="Replacement wording (follows the corrected answer you type above)"></textarea>
       <div class="muted">If you are not the document's owner, the change waits for the owner's approval. The answer itself is corrected right away.</div>
     </div></div>`;
+}
+function revSync(id) {
+  const n = $(`rev-doc-new-${id}`);
+  if (n && !n.dataset.touched) n.value = $(`rev-ans-${id}`).value;
 }
 function revDocFill(id) {
   const docId = Number($(`rev-doc-sel-${id}`).value);

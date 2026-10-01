@@ -180,7 +180,7 @@
       if (verdict === "correct") { corrected = prompt("Write the corrected answer:"); if (!corrected) return; }
       try { await A(`/insights/rereview/${qa}`, { method: "POST", body: JSON.stringify({ verdict, corrected_answer: corrected || "" }) }); loadReview(); } catch (e) { alert(e.message); }
     },
-    "esc-run": async () => { if (!confirm("Pretend every deadline has passed and move overdue items up one level? (demo)")) return;
+    "esc-run": async () => { if (!confirm("Run the escalation check now and move overdue items up one level?")) return;
       try { const r = await A("/insights/escalations/run", { method: "POST", body: JSON.stringify({ force: true }) }); alert(`${r.hops.length} item(s) escalated.`); loadReview(); } catch (e) { alert(e.message); } },
     impact: async () => { const id = $("ia-fact").value; if (!id) return;
       const out = $("ia-impact-out"); out.innerHTML = "…";
@@ -262,7 +262,7 @@
         (esc_.items.length ? `<table class="mini">${esc_.items.map(i => `<tr><td>${i.kind === "answer" ? "🚩 flagged answer" : "📄 document review"}</td><td>${E(i.title)}</td>
           <td>with <b>${E(i.holder || "—")}</b></td><td class="muted">level ${i.level}${i.chain && i.chain.length ? ` of ${i.chain.length - 1}` : ""} · due ${D(i.due)}</td></tr>`).join("")}</table>` : `<div class="empty-note">No open items.</div>`)
         + (esc_.log.length ? `<h4 class="muted" style="margin:12px 0 4px">Escalation history</h4><ul class="ia-reasons">${esc_.log.map(l => `<li>${D(l.at)} — ${E(l.detail)}</li>`).join("")}</ul>` : "")
-        + (atLeast("admin") ? `<button class="btn-ghost" data-ia="esc-run">⏩ Simulate deadline passing (demo)</button>` : "")) : ""}
+        + (atLeast("admin") ? `<button class="btn-ghost" data-ia="esc-run">⏩ Run escalation check now</button>` : "")) : ""}
       ${rules}`;
     refreshReviewPill();
   }
